@@ -1,11 +1,11 @@
 import re
 import os
-from typing import Dict
-from infrastructure.open_microsoft_document import OpenXLSDocument, OpenDOCDocument, OpenPPTDocument
+from typing import Dict, List
+from infrastructure.open_microsoft_document import OpenXLSDocument
+from infrastructure.open_ppt_document import OpenPPTDocument
+from infrastructure.open_doc_document import OpenDOCDocument
 from domain.iopen_document import IOpenDocument
 from domain.line_updater import LineUpdater
-#from infrastructure.openai_transformations import OpenAILineImprover, OpenAILineTranslator, OpenAILineSuggestor, OpenAILineSimpleSuggestor
-#from domain.enum_transformations import Transformation
 from domain.worker_class import IProcessorType, Worker, MultithreadedWorkers
 from domain.llm_utils import LLMUtils
 from infrastructure.processors import SerializedDocProcessorType, SerializedSynchronizedDocProcessorType
@@ -25,7 +25,9 @@ class ApplicationService:
                  engine_name: str,
                  max_parallel_thread: int,
                  logger: GenericLogger,
-                 use_debugger_ai: bool = False):
+                 use_debugger_ai: bool = False,
+                 slides_to_skip: List = None,
+                 slides_to_keep: List = None):
         
         self.logger: GenericLogger = logger
         self.to_document = to_document
@@ -38,6 +40,9 @@ class ApplicationService:
         )
         worker: Worker = ApplicationService.__create_worker(line_updater, logger, max_parallel_thread)
         logger.log_info(f'Transforming from {document_path} to {to_document}.')
+        if len(slides_to_skip) > 0: logger.log_info(f'Slides to skip: {slides_to_skip}.')
+        if len(slides_to_keep) > 0: logger.log_info(f'Slides to keep: {slides_to_keep}.')
+        
         if re.search(r'\.doc[\w]*$', document_path):
             logger.log_info("Handling word document")
 
@@ -53,10 +58,12 @@ class ApplicationService:
                                                  logger)        
         elif re.search(r'\.ppt[\w]*$', document_path):
             logger.log_info("Handling PPT document")
+
             self.open_document = OpenPPTDocument(document_path, 
                                                  worker, 
                                                  paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
-                                                 logger)
+                                                 slides_to_skip, slides_to_keep, 
+                                                 logger, llm_utils)
 
     @staticmethod
     def __create_worker(line_updater: LineUpdater, logger: GenericLogger, max_parallel_thread: int) -> Worker:

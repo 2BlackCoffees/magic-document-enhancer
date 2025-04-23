@@ -51,15 +51,17 @@ class MetadataDoc(Metadata):
         self.thread_lock_queue.acquire()
         # Split LLM transformation per paragraph and ensure that the number of paragraph returned by LLM 
         # does not exceed the original number of paragraphs
-        parapgrahs = text.split("\n")
-        while (len(parapgrahs) > 1 and len(parapgrahs) > len(self.list_pointer_source_data)):
-            parapgrahs[-2] += "\n" + parapgrahs[-1]
-            parapgrahs = parapgrahs[0:len(parapgrahs) - 1]
-        for index in range(len(parapgrahs)):
-            self.list_pointer_source_data[index].text = parapgrahs[index]
+        paragraphs = text.split("\n")
+        while (len(paragraphs) > 1 and len(paragraphs) > len(self.list_pointer_source_data)):
+            paragraphs[-2] += "\n" + paragraphs[-1]
+            paragraphs = paragraphs[0:len(paragraphs) - 1]
+        if len(paragraphs) > len(self.list_pointer_source_data):
+            print(f"WARNING: len(paragraphs) ({len(paragraphs)}) > len(self.list_pointer_source_data) ({len(self.list_pointer_source_data)})")
+        for index in range(min(len(paragraphs), len(self.list_pointer_source_data))):
+            self.list_pointer_source_data[index].text = paragraphs[index]
         # If the number of paragraphs returned by LLM is lower than the current number of paragraphs 
         # in the original document clear the text.
-        for index in range(len(parapgrahs), len(self.list_pointer_source_data)):
+        for index in range(len(paragraphs), len(self.list_pointer_source_data)):
              self.list_pointer_source_data[index].text = ""
         #self.pointer_source_data.text = text
         self.thread_lock_queue.release() 

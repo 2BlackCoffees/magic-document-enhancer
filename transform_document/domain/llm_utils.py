@@ -178,4 +178,14 @@ class LLMUtils:
                 parameter_list.append(int(parameter))
         return parameter_list
     
- 
+    @staticmethod
+    def get_list_parameters(parameters):
+        parameter_list: List = []
+        for parameter in parameters:
+            if '-' in parameter:
+                parameter_range = parameter.split('-')
+                for parameter_nb in range(int(parameter_range[0]), int(parameter_range[1]) + 1):
+                    parameter_list.append(int(parameter_nb))
+            else:
+                parameter_list.append(int(parameter))
+        return parameter_list

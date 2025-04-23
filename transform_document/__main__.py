@@ -2,12 +2,12 @@
 import os
 import sys
 import argparse
-import math
 from pstats import SortKey
 from pathlib import Path
 import signal
 from datetime import datetime
 from functools import partial
+from typing import List
 
 from services.application_service import ApplicationService
 from domain.logger import Logger, LoggerType
@@ -61,9 +61,11 @@ def main() -> None:
     logger = Logger(logger_type)
     llm_utils: LLMUtils = LLMUtils(os.getenv("MAGIC_ADDITIONAL_REQUEST", default=""), from_language, logger)
     parser = argparse.ArgumentParser(prog=program_name)
-    parser.add_argument('--from_document', type=str, help='Specify the document to open', required=required_parameters_activation)
+    parser.add_argument('--from_document', type=str, help='Specify the document to open: If document name ends with doc(x), consider a Microsoft Word document, consider PowerPoint if document name ends with ppt(x).', required=required_parameters_activation)
     parser.add_argument('--to_document', type=str, help='Specify the document to save', required=False)
     parser.add_argument('--transformation', type=int, help=f'Specify one transformation request to process from the following list: [[ {llm_utils.get_all_requests_and_ids_str()} ]]')
+    parser.add_argument('--skip_slides', type=csv_, help='For ppt(x) documents only: Specify slides to skip: 1,2-5,8: Cannot be used with only_slides')
+    parser.add_argument('--only_slides', type=csv_, help='For ppt(x) documents only: Specify slides to keep: 1,2-5,8: Cannot be used with skip_slides')
 
     parser.add_argument('--paragraph_start_min_word_numbers', type=str, help=f'When defining the start of a line or paragraph this defines the minimum number of words ({paragraph_start_min_word_numbers} per default)', required=False)
     parser.add_argument('--paragraph_start_min_word_length', type=str, help=f'When defining the start of a line or paragraph this defines the minimum number of chars in each of the initial words ({paragraph_start_min_word_length} per default)', required=False)
@@ -73,7 +75,7 @@ def main() -> None:
     parser.add_argument('--max_number_threads', type=int, help=f'Specify the maximum number of parallel thread (Default {max_number_threads})', required=False)
     parser.add_argument('--language', type=str, help='Specify the language of your text', required=False)
 
-    parser.add_argument('--engine', type=str, help='Engine name.', required=False)
+    parser.add_argument('--engine', type=str, help='LLM Engine name.', required=False)
 
     args = parser.parse_args()
     
@@ -82,6 +84,17 @@ def main() -> None:
     elif args.debug:
         logger_type = LoggerType.DEBUG
     logger = Logger(logger_type)
+
+    if args.skip_slides and args.only_slides:
+        print("ERROR: Please either use option skip_slides or only_slides but not both!")
+        sys.exit(0)
+
+    slides_to_skip: List = []
+    if args.skip_slides:
+        slides_to_skip = LLMUtils.get_list_parameters(args.skip_slides)
+    slides_to_keep: List = []
+    if args.only_slides:
+        slides_to_keep = LLMUtils.get_list_parameters(args.only_slides)
 
     if args.transformation:
         transformation = args.transformation           
@@ -134,7 +147,9 @@ def main() -> None:
         engine,
         max_number_threads,
         logger,
-        use_debugger_ai)
+        use_debugger_ai,
+        slides_to_skip,
+        slides_to_keep)
     
     application_service.process()
     ended_epoch: datetime.date = datetime.now()

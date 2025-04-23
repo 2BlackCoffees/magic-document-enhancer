@@ -1,5 +1,4 @@
 import re
-from docx import Document
 from openpyxl import load_workbook
 from pptx import Presentation
 from typing  import List, Dict
@@ -33,220 +32,6 @@ class IOpenAndUpdateDocument(IOpenDocument):
         self.document.save(filename)
         self.logger.log_info(f"Saved final document as {filename}")
 
-class OpenDOCDocument(IOpenAndUpdateDocument):
-    HEADING_NAME: str = "Heading name"
-    SECTION_TEXT: str = "Paragraph text"
-    HEADING_POINTER: str = "Heading Pointer"
-    PARAGRAPH_POINTERS: str = "Paragraph Pointers"
-    INIT_HEADING = "no heading"
-    def __init__(self, 
-                 document_path: str, 
-                 worker: Worker, 
-                 paragraph_start_min_word_numbers: int,
-                 paragraph_start_min_word_length: int, 
-                 logger: GenericLogger):
-        super().__init__(document_path, worker, 
-                         paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
-                         logger)
-        self.document =  Document(document_path)
-
-    def __get_heading_deepness(self, heading_style) -> int:
-        regexp = re.compile(r'^heading\s+(\d+)')
-        m = regexp.match(heading_style)
-        if m:
-            return int(m.group(1))
-        return -1
-
-    def __append_data(self, file_content: List, current_heading_style: str, highest_heading_style: str, \
-                      latest_heading_pointer: any, heading_text: str, \
-                      latest_headings_text: List, paragraph_text: str):
-        # When appending a new heading and assocaited text, we search for the latest element of file_content
-        # The we iterate over all heading searching for latest element of each array until parent heading is found
-        heading_deepness: int = self.__get_heading_deepness(current_heading_style)
-        if heading_deepness > 0:
-            heading_text = f"{'#' * heading_deepness} {heading_text}"
-
-        new_data_structure: Dict = {
-            current_heading_style:[
-                {self.HEADING_NAME: heading_text, self.HEADING_POINTER: latest_heading_pointer},
-                {self.SECTION_TEXT: paragraph_text, self.PARAGRAPH_POINTERS: latest_headings_text}
-            ]
-        }
-        if (len(file_content) > 0 or current_heading_style < highest_heading_style) and \
-                            current_heading_style.startswith("heading"):
-            # Search for latest data structure indexed by a header higher than current one
-            sub_heading_found: bool = True
-            parent_data_structure: List = file_content
-
-            if len(parent_data_structure) > 0:
-                while sub_heading_found:
-                    sub_heading_found = False
-                    for key, dictionary in parent_data_structure[-1].items():
-                        self.logger.log_trace(f"In for loop: key: {key}, \ndictionnary: {str(pformat(dictionary))[:100]}\n\n")
-                        if key.startswith("heading") and key < current_heading_style:
-                            self.logger.log_trace(f"**** Key {key} accepted****")
-                            parent_data_structure = dictionary
-                            # There can be only one key
-                            sub_heading_found = True
-                            break
-                    if sub_heading_found:
-                        self.logger.log_trace(f"\nIn while: latest_data_structure: {str(pformat(parent_data_structure))[:100]}")
-            self.logger.log_trace(f"parent_data_structure: {pformat(parent_data_structure)}")
-            parent_data_structure.append(new_data_structure)
-        else:
-            file_content.append(new_data_structure)
-        self.logger.log_debug(f"file_content: {pformat(file_content)}")
-
-    def __iter_headings(self, paragraphs):
-        file_content: List = []
-        latest_heading_style: str = self.INIT_HEADING
-        highest_heading_style: str = self.INIT_HEADING
-        latest_heading_text: str = self.INIT_HEADING
-        latest_text_paragraph: str = ""
-        latest_paragraphs_pointer: List = []
-        latest_heading_pointer: any = None
-        # Below is an example of the data structure that is going to be created
-        # [{"Heading 1": [
-        #     {"Heading name": "Heading ...", "Pointer": pointer}
-        #     {"Text": "Full Text content below heading1", "Pointer": [pointer1, pointer2, ...]},
-        #     {"Heading 2": [
-        #         {"Heading name": "Heading ...", "Pointer": pointer}
-        #         {"Text": "Full Text content below Heading 2", "Pointer": [pointer1, pointer2, ...]},
-        #         {"Heading 3": [
-        #           {"Heading name": "Heading ...", "Pointer": pointer}
-        #           {"Text": "Full Text content below Heading 3", "Pointer": [pointer1, pointer2, ...]}
-        #         ]},
-        #         {"Heading 3": [
-        #           {"Heading name": "Heading ...", "Pointer": pointer}
-        #           {"Text": "Full Text content below Heading 3", "Pointer": [pointer1, pointer2, ...]},
-        #          ]},
-        #     ]}
-        #  ]},
-        #  {"Heading 1": [   // When appending search latest of each element until parent heading is found
-        #     {"Heading name": "Heading ...", "Pointer": pointer}
-        #     {"Text": "Full Text content below heading1", "Pointer": [pointer1, pointer2, ...]},
-        #     {"Heading 2": [
-        #         {"Heading name": "Heading ...", "Pointer": pointer}
-        #         {"Text": "Full Text content below Heading 2", "Pointer": [pointer1, pointer2, ...]}]
-        #     },
-        #     {"Heading 2": [
-        #         {"Heading name": "Heading ...", "Pointer": pointer}
-        #         {"Text": "Full Text content below Heading 2", "Pointer": [pointer1, pointer2, ...]}
-        #         {"Heading 3": [
-        #           {"Heading name": "Heading ...", "Pointer": pointer}
-        #           {"Text": "Full Text content below Heading 3", "Pointer": [pointer1, pointer2, ...]},
-        #          ]}
-        #       ]
-        #     }
-        #    ]
-        #  }
-        # ]
-
-        for paragraph in paragraphs:
-            current_heading_style: str = paragraph.style.name.lower()
-            if current_heading_style.startswith('heading'):
-                # We need to consider cases where a document starts with Heading 2 and later gets Heading 1
-                if latest_heading_pointer is not None:
-                    self.logger.log_trace(f"Adding data from latest_heading_text = {latest_heading_text}")
-                    self.__append_data(file_content, latest_heading_style, highest_heading_style, \
-                                       latest_heading_pointer, latest_heading_text, \
-                                       latest_paragraphs_pointer, latest_text_paragraph)
-                latest_text_paragraph = ""
-                latest_paragraphs_pointer = []
-               
-                latest_heading_style = paragraph.style.name.lower()
-                latest_heading_text = paragraph.text
-                latest_heading_pointer = paragraph
-                current_heading_deepness: int = self.__get_heading_deepness(current_heading_style)
-                highest_heading_deepness: int = self.__get_heading_deepness(highest_heading_style)
-                if highest_heading_style == self.INIT_HEADING or \
-                   (current_heading_deepness < highest_heading_deepness and current_heading_deepness > 0):
-                    highest_heading_style = current_heading_style
-            else:
-                # Typcally a document starts wit a main title that we represent here as heading 0
-                if latest_heading_pointer == None:
-                    latest_heading_text = paragraph.text
-                    latest_heading_pointer = paragraph
-                    latest_heading_style = "heading 0"
-                    self.logger.log_debug(f"Found paragraph before any heading: {latest_heading_text}, creating fakes heading: {latest_heading_style}")
-
-                latest_text_paragraph += paragraph.text + "\n"
-                latest_paragraphs_pointer.append(paragraph)
-        self.__append_data(file_content, latest_heading_style, highest_heading_style, \
-                           latest_heading_pointer, latest_heading_text, \
-                           latest_paragraphs_pointer, latest_text_paragraph)
-        self.logger.log_debug(pformat(file_content))
-        return file_content
-    
-    def __dispatch_requests(self, file_content: List, prev_headings: List):
-        for section in file_content:
-            heading_name: str = None
-            if isinstance(section, dict):
-                section_text: str = section[self.SECTION_TEXT] if self.SECTION_TEXT in section else ""
-                list_pointers: List = [section[self.HEADING_POINTER]] if self.HEADING_POINTER in section else []
-                list_pointers.extend(section[self.PARAGRAPH_POINTERS] if self.PARAGRAPH_POINTERS in section else [])
-
-                if self.HEADING_NAME in section:
-                    heading_name: str = section[self.HEADING_NAME] 
-                    section_text = heading_name + "\n" + section_text
-                    prev_headings.append(heading_name)
-
-                self.worker.add_work_element(MetadataDoc(list_pointers, \
-                                                         "\n".join(prev_headings), \
-                                                         section_text))
-
-                match = re.compile(r'^heading\s+(\d+)')
-                for key, sub_section in section.items(): 
-                    if match.match(key):
-                        self.__dispatch_requests(sub_section, prev_headings)
-
-    def __create_table(self, table):        
-        current_table: str = ""
-        first_row: bool = True
-        first_paragraph: any = None
-        for row in table.rows:
-            current_row: str = ""
-            for cell in row.cells:
-                self.logger.log_debug("Analyzing table")
-                cell_value: str = ""
-                if len(cell.paragraphs > 0):
-                    cell_value = " ".join([p.text for p in cell.parahraphs]) + "\n"
-                    for p in cell.parahraphs:
-                        p.text = ""
-                        if first_paragraph is None:
-                            first_paragraph = p
-                    
-                if len(cell.tables) > 0:
-                    for table in cell.tables:
-                        tmp_cell_value, tmp_first_paragraph = self.__create_table(cell) + "\n"
-                        cell_value += tmp_cell_value
-                        if first_paragraph is None:
-                            first_paragraph = tmp_first_paragraph
-                current_row += f"|{cell_value}"
-            if len(current_row) > 0:
-                current_table += "\n" + current_row + "|"
-            if first_row:
-                current_table = "\n" + "-" * len(current_table)
-                first_row = False
-        return current_table, first_paragraph
-
-    #TODO: All requests should be running in multiple threads
-    def __fill_tasks(self, document: any):
-        file_content: List = self.__iter_headings(document.paragraphs)
-        prev_headings: List = []
-        self.__dispatch_requests(file_content, prev_headings)
-
-        for table in document.tables:
-            table, first_paragraph = self.__create_table(table)
-
-            self.worker.add_work_element(MetadataDoc([first_paragraph], \
-                                                      "\n".join(prev_headings), \
-                                                      table))            
-
-    def process(self):
-        self.__fill_tasks(self.document)
-        self.worker.process_all()
-
 
 class OpenXLSDocument(IOpenAndUpdateDocument):
     def __init__(self, document_path: str, 
@@ -273,30 +58,129 @@ class OpenXLSDocument(IOpenAndUpdateDocument):
         self.__fill_tasks(self.document)
         self.worker.process_all()
 
-class OpenPPTDocument(IOpenAndUpdateDocument):
-    def __init__(self, document_path: str, 
-                 worker: Worker, 
-                 paragraph_start_min_word_numbers: int,
-                 paragraph_start_min_word_length: int, 
-                 logger: GenericLogger):
-        super().__init__(document_path, 
-                         worker, 
-                         paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
-                         logger)
-        self.document =  Presentation(document_path)
-    
-    def __fill_tasks(self, ppt_slides: any):
-        # To get shapes in your slides
-        for slide in  ppt_slides.slides:
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    text_frame = shape.text_frame
-                    for paragraph in text_frame.paragraphs:
-                        current_text: str = paragraph.text
-                        if current_text is not None and self.is_paragraph(current_text): 
-                            self.worker.add_work_element(MetadataPpt(paragraph))
+# class OpenPPTDocument(IOpenAndUpdateDocument):
+#     def __init__(self, document_path: str, 
+#                  worker: Worker, 
+#                  paragraph_start_min_word_numbers: int,
+#                  paragraph_start_min_word_length: int, 
+#                  slides_to_keep: List,
+#                  slides_to_skip: List,
+#                  logger: GenericLogger):
+#         super().__init__(document_path, 
+#                          worker, 
+#                          paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
+#                          logger)
+#         self.document =  Presentation(document_path)
+#         self.slides_to_keep = slides_to_keep
+#         self.slides_to_skip = slides_to_skip
 
-    def process(self):
-        self.__fill_tasks(self.document)
-        self.worker.process_all()
+#     def __extract_ppt(self):
+
+#         deck_content: List = []
+#         for slide_idx, slide in enumerate(self.document.slides):
+
+#             slide_number: int = slide_idx + 1
+#             if slide_number in self.slides_to_skip:
+#                 self.__print_slide_keep_skip_info(f"Skipped slide number {slide_number} as per request.")
+#                 continue
+
+#             if self.slides_to_keep is not None and len(self.slides_to_keep) > 0:
+#                 if slide_number not in self.slides_to_keep:
+#                     continue              
+
+#             if slide.element.get('show', '1' == '0'):
+#                 self.__print_slide_keep_skip_info(f"Skipped hidden slide number {slide_number}.")
+#                 continue
+ 
+#             self.logger.info(f"Analyzing slide number {slide_number}")
+ 
+#             shape_descriptions: list = [] 
+#             for shape in slide.shapes:
+#                 if shape.has_text_frame:
+#                     shape_descriptions.append(PPTReader.get_text_box_info(slide_number, shape))
+ 
+#                 elif shape.has_table: 
+#                     table = shape.table
+#                     table_elements: list = []
+#                     table_str: str = ""
+#                     for row_idx, row in enumerate(table.rows, start = 1):
+#                         table_str += "\n|"
+#                         for col_idx, cell in enumerate(row.cells, start=1):
+#                             if cell.text_frame is not None:
+#                               text: str = cell.text_frame.text.replace("\n", " ")
+#                               table_elements.append({'row': row_idx, 'col': col_idx, 'text': text})
+#                               table_str += text + "|"
+ 
+#                     shape_descriptions.append(PPTReader.get_table_info(slide_number, shape, table, table_elements, table_str))
+ 
+#                 elif shape.shape_type == MSO_SHAPE_TYPE.GROUP: 
+#                     shape_descriptions.append(PPTReader.get_group_info(slide_number, shape))
+               
+#                 else: 
+#                     shape_descriptions.append(PPTReader.get_shape_type_info(slide_number, shape))
+ 
+#             title_value: str = None
+#             shape_title: Dict = None
+#             title_found: bool = False
+#             if hasattr(slide.shapes, "title") and hasattr(slide.shapes.title, "text") and slide.shapes.title.text is not None and len(slide.shapes.title.text) > 0:
+#                 title_value = slide.shapes.title.text
+#                 for shape_description in shape_descriptions:
+#                     if shape_description["raw_text"] == title_value:
+#                         shape_title = shape_description
+#                         shape_title["json"]["shape"]["is_title"] = True
+#                         title_found = True
+#                 if not title_found:
+#                     shape_description: Dict = PPTReader.create_title(slide_number, title_value)
+#                     shape_title = shape_description
+#                     shape_descriptions.append(shape_description)
+
+#             sorted_shapes: List = PPTReader.get_sorted_shapes_by_pos_y(shape_descriptions)
+
+#             slide_shapes_content, title, slide_info, reduced_slide_text = self.__get_slide_details(sorted_shapes, slide_number, shape_title)
+#             slide_content: Dict = {
+#                 "slide_info": slide_info,
+#                 "title": title,
+#                 "shapes": slide_shapes_content,
+#                 "reduced_slide_text": reduced_slide_text
+#             }
+
+#             if self.want_selected_text_slide_requests or self.want_selected_artistic_slide_requests:
+#                 self.content_out.add_title(1, f"Analyzing slide {slide_number} {title}")
+
+#                 if self.want_selected_text_slide_requests:
+#                     self.content_out.add_title(2, f"Check of text content for slide {slide_number}")
+#                     checker: IChecker = TextSlideChecker(self.llm_utils, self.selected_text_slide_requests, f' (Slide {slide_idx + 1})', f' (Slide {slide_idx + 1})')
+#                     self.llm_access.set_checker(checker)
+#                     self.__send_llm_requests_and_expand_output(slide_content["shapes"], False)
+
+#                 if self.want_selected_artistic_slide_requests:
+#                     self.content_out.add_title(2, f"Check of artistic content for slide {slide_number}")
+#                     checker: IChecker = ArtisticSlideChecker(self.llm_utils, self.selected_artistic_slide_requests, f' (Slide {slide_idx + 1})', f' (Slide {slide_idx + 1})')
+#                     self.llm_access.set_checker(checker)
+#                     self.__send_llm_requests_and_expand_output(slide_content["shapes"], False)
+                    
+#             deck_content.append(slide_content)
+
+#         if len(self.selected_deck_requests) > 0:
+#             self.content_out.add_title(1, f"Check of text content and flow for the whole deck")
+#             formatted_deck_content_list: List = [ f'Slide {slide_number + 1}, {slide_content["title"]}:\n{json.dumps(slide_content["reduced_slide_text"])}' \
+#                                                   for slide_number, slide_content in enumerate(deck_content) ]
+#             checker: IChecker = DeckChecker(self.llm_utils, self.selected_deck_requests, f' (Deck)', f' (Deck)')
+#             self.llm_access.set_checker(checker)
+#             self.__send_llm_requests_and_expand_output(formatted_deck_content_list, True)
+
+#     def __fill_tasks(self, ppt_slides: any):
+#         # To get shapes in your slides
+#         for slide in  ppt_slides.slides:
+#             for shape in slide.shapes:
+#                 if shape.has_text_frame:
+#                     text_frame = shape.text_frame
+#                     for paragraph in text_frame.paragraphs:
+#                         current_text: str = paragraph.text
+#                         if current_text is not None and self.is_paragraph(current_text): 
+#                             self.worker.add_work_element(MetadataPpt(paragraph))
+
+#     def process(self):
+#         self.__fill_tasks(self.document)
+#         self.worker.process_all()
 

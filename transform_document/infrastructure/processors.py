@@ -1,5 +1,5 @@
 from typing import List
-from domain.line_updater import LineUpdater
+from domain.llm_endpoint_request import LLMEndpointRequest
 from domain.queue import Queue, Metadata, ThreadSafeQueue
 from domain.logger import GenericLogger
 from domain.worker_class import IProcessorType
@@ -10,11 +10,11 @@ from datetime import datetime
 import re
 
 class SerializedDocProcessorType(IProcessorType):
-    def __init__(self, line_updater: LineUpdater, logger: GenericLogger):
+    def __init__(self, llm_request: LLMEndpointRequest, logger: GenericLogger):
         self.queue: Queue = Queue()
         self.initial_size = 0
 
-        self.line_updater: LineUpdater = line_updater
+        self.llm_request: LLMEndpointRequest = llm_request
         self.logger: GenericLogger = logger
 
     def add_element(self, metadata: Metadata) -> None:
@@ -49,28 +49,33 @@ class SerializedDocProcessorType(IProcessorType):
     def __is_single_line_heading(self, initial_text: str) -> bool:
         return re.match(r'^\s*#.*$', initial_text) and len(initial_text.strip().split("\n")) <= 1
     
+    def __get_heading_request(self, heading_text: str) -> str:
+        return f'[Process the request of the heading provided in double quotes and please ensure keeping one single line for the heading: "{heading_text}"]'
+
     
     def process_next(self) -> None:
         metadata: Metadata = self.pop_next_element()
-        initial_text: str = metadata.get_text_value()
+        text_to_transform: str = metadata.get_text_to_transform()
         context: str = metadata.get_context()
+        request_type: str = metadata.get_request_type()
         request: str = ""
-        request_str: str = f"[Process the request on the text: {initial_text}]"
-        if self.__is_single_line_heading(initial_text):
-            request_str = f"[Process the request on the heading and please ensure keeping one single line for the heading: {initial_text}]"
+        request_str: str = f'[Process the request of the heading provided in double quotes: "{text_to_transform}"]'
 
-        if self.__is_context_needed(context, initial_text):
+        if self.__is_single_line_heading(text_to_transform):
+            request_str = self.__get_heading_request(text_to_transform)
+
+        if self.__is_context_needed(context, text_to_transform):
             request = f"[Considering the context: {context}], {request_str}"
-        elif initial_text is not None and len(initial_text) > 0:
-            request = f"Process the request on the heading and please ensure keeping one single line for the heading: {initial_text}"
+        elif text_to_transform is not None and len(text_to_transform) > 0:
+            request = self.__get_heading_request(text_to_transform)
         else:
-            self.logger.log_info(f"Skipping request because context = >{context}<, initial_text = >{initial_text}<")
+            self.logger.log_info(f"Skipping request because context = >{context}<, initial_text = >{text_to_transform}<")
             return
 
         self.logger.log_info(f'--\nRequest: {request}')
-        new_text = self.line_updater.update_line(request)
-        self.logger.log_info(f'\nModified to :\n{new_text}\n')
-        metadata.set_text_value(new_text)
+        new_text = self.llm_request.transform_text(request, request_type)
+        self.logger.log_info(f'\nLLM response:\n{new_text}\n')
+        metadata.update_llm_response_in_document(new_text, request_type)
 
     def process_all(self) -> None:
         self.trigger_process_start()
@@ -82,13 +87,13 @@ class SerializedSynchronizedDocProcessorType(IProcessorType):
         thread_access: MultithreadedAccess
         
 
-    def __init__(self, line_updater: LineUpdater, logger: GenericLogger, max_parallel_thread: int = 10):
+    def __init__(self, line_updater: LLMEndpointRequest, logger: GenericLogger, max_parallel_thread: int = 10):
         threading.Thread.__init__(self, )
         self.thread_stop_thread = threading.Lock()
         self.stop_now: bool = False        
         self.queue: ThreadSafeQueue = ThreadSafeQueue(logger)
 
-        self.line_updater: LineUpdater = line_updater
+        self.line_updater: LLMEndpointRequest = line_updater
         self.logger: GenericLogger = logger
         self.max_parallel_thread: int = max_parallel_thread
         self.running_thread_ids: List[MultithreadedAccess] = []
@@ -136,7 +141,7 @@ class SerializedSynchronizedDocProcessorType(IProcessorType):
         last_informed_statistics = datetime.now()
         backofftime_handler: BackoffTimeHandler = BackoffTimeHandler()
         for queue_element_id in range(self.queue.size()):
-            paragraph: str = self.queue.get_element(queue_element_id).metadata.get_text_value()
+            paragraph: str = self.queue.get_element(queue_element_id).metadata.get_text_to_transform()
             if len(paragraph) > 0:
                 self.logger.log_info(f"Pragraph {queue_element_id} saved in queue: {paragraph[0:50]}...")
             else:

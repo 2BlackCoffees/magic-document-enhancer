@@ -154,6 +154,15 @@ Word documents are transformed in a JSON structure like the following:
      ]
 
 ```
-When performing the request, the script tries to provide some contect to the LLM. Context is currently the list of headers happening before the text.
+When performing the request, the script tries to provide some contect to the LLM:
+* For word documents, context is currently the list of headers happening before the text.
+* For Powerpoint document the slide content is the context.
 
-While transforming a word document if the number of paragraphs is different, the styles in the word document will look awkward and will require hands on changes. In order to improve this, the script will have to recreate properly several of the stylings.
+While transforming a Word or Powerpoint document the styles in the document often look very awkward and will require hands on changes. In order to improve this, the script will have to handle properly the stylings.
+
+# Improvements required
+Following is the list of improvements that this script will require:
+1. Handling styles of the destination document
+2. Work with KGPT team to ensure we are following properly the openai api: I was able to use openai endpoint with openai API however for some reasons that still need to be analyzed it required some workarounds when using KGPT endpoint.
+3. Temperature and Top_p despite provided to thr API do not seem to influence the generated output.
+4. Some refactoring is needed: Because I worked in my free time, I was not able to deliver the right level of quality.

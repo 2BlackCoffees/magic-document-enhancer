@@ -35,7 +35,7 @@ application_service: ApplicationService = None
 def main() -> None:
     program_name = os.path.basename(sys.argv[0])
     paragraph_start_min_word_numbers: int = 1
-    paragraph_start_min_word_length: int = 2
+    paragraph_start_min_word_length: int = 3
     max_number_threads: int = 1 #math.floor(max((os.cpu_count() - 1), 2) * 1.2)
     from_document: str = None 
     to_document: str = None 

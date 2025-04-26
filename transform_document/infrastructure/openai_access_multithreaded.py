@@ -7,7 +7,7 @@ import time
 
 from domain.logger import GenericLogger
 from domain.queue import MultithreadedMetadata
-from domain.line_updater import LineUpdater
+from domain.llm_endpoint_request import LLMEndpointRequest
 
 
 class ThreadStatus(StrEnum):
@@ -88,9 +88,9 @@ class BackoffTimeHandler:
 
 class MultithreadedAccess(threading.Thread):
     init_value = 1
-    def __init__(self, line_updater: LineUpdater, metadata: MultithreadedMetadata, backofftime_handler: BackoffTimeHandler, statistics: Statistics, logger: GenericLogger):
+    def __init__(self, llm_request: LLMEndpointRequest, metadata: MultithreadedMetadata, backofftime_handler: BackoffTimeHandler, statistics: Statistics, logger: GenericLogger):
         threading.Thread.__init__(self, )
-        self.line_updater: LineUpdater = line_updater
+        self.llm_request: LLMEndpointRequest = llm_request
         self.backoff_retry_needed_value = False
         self.metadata: MultithreadedMetadata = metadata
         self.thread_lock = threading.Lock()
@@ -143,22 +143,22 @@ class MultithreadedAccess(threading.Thread):
         return self.metadata
     
     def get_transformed_text(self) -> str:
-        return self.metadata.metadata.get_text_value()
+        return self.metadata.metadata.get_text_to_transform()
     
     def run(self) -> None:
         self.update_thread_status(ThreadStatus.THREAD_STARTED)
         if self.metadata is not None:
             self.update_thread_status(ThreadStatus.ACCESSING_PARAGRAPH_FROM_DOCUMENT)
-            line_to_transform: str = self.metadata.metadata.get_text_value()
+            line_to_transform: str = self.metadata.metadata.get_text_to_transform()
             paragraph_updated: bool = False
             backoff_requested: bool = False
             while not paragraph_updated and not self.skip_requested():
                 try:
                     self.update_thread_status(ThreadStatus.READY_TO_CALL_OPENAI, line_to_transform)
-                    new_paragraph: str = self.line_updater.try_update_line(line_to_transform)
+                    new_paragraph: str = self.llm_request.try_transform_text(line_to_transform, self.metadata.metadata.get_request_type())
                     if not self.skip_requested():
                         self.update_thread_status(ThreadStatus.READY_TO_UPDATE_PARAGRAPH, line_to_transform)
-                        self.metadata.metadata.set_text_value(new_paragraph)
+                        self.metadata.metadata.update_llm_response_in_document(new_paragraph, self.metadata.metadata.get_request_type())
                         self.update_thread_status(ThreadStatus.FINISHED_UPDATING_PARAGRAPH, line_to_transform)
                     paragraph_updated = True
                     if backoff_requested:

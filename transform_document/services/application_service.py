@@ -5,7 +5,7 @@ from infrastructure.open_microsoft_document import OpenXLSDocument
 from infrastructure.open_ppt_document import OpenPPTDocument
 from infrastructure.open_doc_document import OpenDOCDocument
 from domain.iopen_document import IOpenDocument
-from domain.line_updater import LineUpdater
+from domain.llm_endpoint_request import LLMEndpointRequest
 from domain.worker_class import IProcessorType, Worker, MultithreadedWorkers
 from domain.llm_utils import LLMUtils
 from infrastructure.processors import SerializedDocProcessorType, SerializedSynchronizedDocProcessorType
@@ -33,12 +33,12 @@ class ApplicationService:
         self.to_document = to_document
         self.open_document: IOpenDocument = None
         self.llm_utils = llm_utils
-        line_updater: LineUpdater = self.__create_line_udater(
+        llm_requester: LLMEndpointRequest = self.__create_line_udater(
             transformation, from_language, 
             engine_name,
             use_debugger_ai
         )
-        worker: Worker = ApplicationService.__create_worker(line_updater, logger, max_parallel_thread)
+        worker: Worker = ApplicationService.__create_worker(llm_requester, logger, max_parallel_thread)
         logger.log_info(f'Transforming from {document_path} to {to_document}.')
         if len(slides_to_skip) > 0: logger.log_info(f'Slides to skip: {slides_to_skip}.')
         if len(slides_to_keep) > 0: logger.log_info(f'Slides to keep: {slides_to_keep}.')
@@ -66,7 +66,7 @@ class ApplicationService:
                                                  logger, llm_utils)
 
     @staticmethod
-    def __create_worker(line_updater: LineUpdater, logger: GenericLogger, max_parallel_thread: int) -> Worker:
+    def __create_worker(line_updater: LLMEndpointRequest, logger: GenericLogger, max_parallel_thread: int) -> Worker:
         processor_type: IProcessorType = None
         worker: Worker = None
         if max_parallel_thread <= 1:
@@ -81,12 +81,12 @@ class ApplicationService:
     
     def __create_line_udater(self, transformation: int,  from_language: str,  
                              engine_name: str,
-                             use_debugger_ai: bool) -> LineUpdater:
-        line_updater: LineUpdater = None
+                             use_debugger_ai: bool) -> LLMEndpointRequest:
+        line_updater: LLMEndpointRequest = None
         mlaccess: IMLAccess = OpenAIAccess(self.logger, engine_name) if not use_debugger_ai else OpenAIDebugAccess(logger)
         request: Dict = self.llm_utils.get_request(transformation)
         self.llm_utils.set_requests(from_language)
-        line_updater: LineUpdater = LineUpdater(mlaccess, request[self.llm_utils.HOW_TO_TRANSFORM], self.logger)
+        line_updater: LLMEndpointRequest = LLMEndpointRequest(mlaccess, request[self.llm_utils.HOW_TO_TRANSFORM], self.logger)
 
         return line_updater
     

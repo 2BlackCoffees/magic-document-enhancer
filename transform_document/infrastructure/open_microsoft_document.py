@@ -23,10 +23,14 @@ class IOpenAndUpdateDocument(IOpenDocument):
         self.worker: Worker = worker
 
     def is_paragraph(self, text: str):
-        minwords: int = int(self.paragraph_start_min_word_numbers) - 1 if int(self.paragraph_start_min_word_numbers) - 1 >= 0 else 0
-        return re.search(r'(\w{' + str(self.paragraph_start_min_word_length) + r',}\b\s+)'+\
-                            r'{' + str(minwords) + r',}' +\
-                                r'\w{' + str(self.paragraph_start_min_word_length) + r',}\b', text)
+        minwords: int = int(self.paragraph_start_min_word_numbers)  # - 1 if int(self.paragraph_start_min_word_numbers) - 1 >= 0 else 0
+        regexp: str = f'(\\w{{{self.paragraph_start_min_word_length},}}\\b\\s+){{{minwords},}}\w{{{self.paragraph_start_min_word_length},}}\\b'
+        paragraph_found: bool = (re.search(regexp, text) is not None)
+        self.logger.log_trace(f"Checking for paragraph for {text} with regexp: {regexp} is {paragraph_found}")
+        # regexp: str = r'(\w{' + str(self.paragraph_start_min_word_length) + r',}\b\s+)'+\
+        #                     r'{' + str(minwords) + r',}' +\
+        #                         r'\w{' + str(self.paragraph_start_min_word_length) + r',}\b'
+        return paragraph_found
         
     def save(self, filename: str) -> None:
         self.document.save(filename)

@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import List
 from dataclasses import dataclass
 import threading
+from pprint import pformat
+
+from domain.llm_utils import LLMUtils
 from domain.logger import GenericLogger
 
 
@@ -20,13 +23,15 @@ class ThreadSynchronization:
 
 class Metadata(ABC):
     
-    def __init__(self, list_pointer_source_data: List, context: str, text_to_transform: str):
+    def __init__(self, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger):
         self.list_pointer_source_data: List = list_pointer_source_data
         self.context = context
         self.text_to_transform: str = text_to_transform
+        self.request_type = request_type
+        self.logger = logger
+        self.logger.log_trace(f"Add metadata of request type {request_type}, text_to_transform: {text_to_transform}")
 
-    #@abstractmethod
-    def get_text_value(self) -> str:
+    def get_text_to_transform(self) -> str:
         return self.text_to_transform
     
     def get_pointers(self):
@@ -35,20 +40,38 @@ class Metadata(ABC):
     def get_context(self) -> str:
         return self.context
     
-    @abstractmethod
-    def set_text_value(self, text: str) -> None:
-        """
-        """
-
-class MetadataDoc(Metadata):
-    thread_lock_queue = threading.Lock()
-
-
-    #def get_text_value(self) -> str:
-    #    return "\n".join([ source_data.text for source_data in self.list_pointer_source_data ])
+    def get_request_type(self) -> str:
+        return self.request_type
     
-    def set_text_value(self, text: str) -> None: 
-        self.thread_lock_queue.acquire()
+    @abstractmethod
+    def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None:
+        """
+        """
+
+    def _update_table(self, md_table_text: str) -> None:
+        if len(self.list_pointer_source_data) > 0:
+            doc_table: any = self.list_pointer_source_data[0]
+            if len(self.list_pointer_source_data) > 1:
+                self.logger.log_warn(f"More than one table was registerd ({len(self.list_pointer_source_data)} registered), currently assuming only one table")
+            self.logger.log_debug(f"Updating table {md_table_text} in microsoft document")
+            md_table_list: List = LLMUtils.md_to_lists(md_table_text, self.logger)
+            self.logger.log_trace(f"Transformed text md table: \n{pformat(md_table_text)} to list based table:\n{pformat(md_table_list)}")
+
+            for row_id, row in enumerate(doc_table.rows):
+                for col_id, cell in enumerate(row.cells):
+                    if row_id < len(md_table_list) and col_id < len(md_table_list[row_id]):
+                        cell.text = md_table_list[row_id][col_id]
+                        self.logger.log_trace(f"Updated cell (row_id:{row_id}, col_id: {col_id}) to {cell.text}")
+                    else:
+                        self.logger.log_error(f"Could not update cell having initial value {cell.text} because of index out of range at coordinate (Row: {row_id}, Col: {col_id}):\n"+\
+                                              f"  Doc Table size: Rows: {len(doc_table.rows)} x Cols: {len(doc_table.rows[row_id].cells)} and \n"+\
+                                              f"  List Table size: Rows: {len(md_table_list)} x Cols: {len(md_table_list[row_id])}")
+
+        else:
+            self.logger.log_error(f"No table was registered for the context: {self.get_context()}\n"+\
+                                  "request:\n{self.get_text_to_transform()}\n")
+
+    def _update_text(self, text:str) -> None:
         # Split LLM transformation per paragraph and ensure that the number of paragraph returned by LLM 
         # does not exceed the original number of paragraphs
         paragraphs = text.split("\n")
@@ -56,28 +79,50 @@ class MetadataDoc(Metadata):
             paragraphs[-2] += "\n" + paragraphs[-1]
             paragraphs = paragraphs[0:len(paragraphs) - 1]
         if len(paragraphs) > len(self.list_pointer_source_data):
-            print(f"WARNING: len(paragraphs) ({len(paragraphs)}) > len(self.list_pointer_source_data) ({len(self.list_pointer_source_data)})")
+            self.logger.log_warn(f"len(paragraphs) ({len(paragraphs)}) > len(self.list_pointer_source_data) ({len(self.list_pointer_source_data)})")
         for index in range(min(len(paragraphs), len(self.list_pointer_source_data))):
             self.list_pointer_source_data[index].text = paragraphs[index]
         # If the number of paragraphs returned by LLM is lower than the current number of paragraphs 
         # in the original document clear the text.
         for index in range(len(paragraphs), len(self.list_pointer_source_data)):
              self.list_pointer_source_data[index].text = ""
-        #self.pointer_source_data.text = text
+
+
+class MetadataDoc(Metadata):
+    thread_lock_queue = threading.Lock()
+
+
+    def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
+        self.thread_lock_queue.acquire()
+        self.logger.log_trace(f"Updating document with request type: {request_tyoe} and text: {text}")
+        if request_tyoe != LLMUtils.TABLE_REQUEST:
+            self._update_text(text)
+        else:
+            self._update_table(text)
         self.thread_lock_queue.release() 
 
 class MetadataXls(Metadata):
     thread_lock_queue = threading.Lock()
 
-    def get_text_value(self) -> str:
+    def get_text_to_transform(self) -> str:
         return str(self.list_pointer_source_data.value)
-    def set_text_value(self, text: str) -> None: 
+    def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
         self.thread_lock_queue.acquire()
         self.list_pointer_source_data.value = text
         self.thread_lock_queue.release() 
 
-class MetadataPpt(MetadataDoc):
-    pass
+class MetadataPpt(Metadata):
+    thread_lock_queue = threading.Lock()
+
+
+    def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
+        self.thread_lock_queue.acquire()
+        self.logger.log_trace(f"Updating document with request type: {request_tyoe} and text: {text}")
+        if request_tyoe != LLMUtils.TABLE_REQUEST:
+            self._update_text(text)
+        else:
+            self._update_table(text)
+        self.thread_lock_queue.release() 
 
 @dataclass
 class MultithreadedMetadata:
@@ -180,13 +225,13 @@ class ThreadSafeQueue(IQueue):
 
         self.thread_lock_queue.acquire()
         for element in self.queue:
-            if element.metadata.get_text_value() == metadata.get_text_value():
+            if element.metadata.get_text_to_transform() == metadata.get_text_to_transform():
                 #TODO: Instead of processing several time the same input, 
                 # the pointers should be stored in a container and be all updated after the AI processing of one
-                self.logger.log_warn(f"Saving a second time the same text {element.metadata.get_text_value()}")
+                self.logger.log_warn(f"Saving a second time the same text {element.metadata.get_text_to_transform()}")
                 break
         self.queue.append(MultithreadedMetadata(metadata, ThreadSynchronization()))
-        self.logger.log_info(f"Added paragraph {len(self.queue)}: {metadata.get_text_value()[0:50]}...")
+        self.logger.log_info(f"Added paragraph {len(self.queue)}: {metadata.get_text_to_transform()[0:50]}...")
         self.thread_lock_queue.release()
 
     def get_element(self, index: int) -> MultithreadedMetadata:
@@ -222,7 +267,7 @@ class ThreadSafeQueue(IQueue):
         self.thread_lock_queue.acquire()
         if self.detailed_debug:
             self.logger.log_trace("\n  ".join([f"(is_empty method call): Thread index: {index},\n" + \
-                                f"    Text: {self.queue[index].metadata.get_text_value()},\n" +\
+                                f"    Text: {self.queue[index].metadata.get_text_to_transform()},\n" +\
                                 f"    Thread running status: {self.queue[index].thread_synchronization.get_running_status()}" \
                                     for index in range(len(self.queue))]))
 
@@ -236,7 +281,7 @@ class ThreadSafeQueue(IQueue):
         if metadata in self.queue:
             self.queue.remove(metadata)
         else:
-            self.logger.log_debug(f"Tried to remove {metadata.metadata.get_text_value()}\nBut it was not present!")
+            self.logger.log_debug(f"Tried to remove {metadata.metadata.get_text_to_transform()}\nBut it was not present!")
         self.thread_lock_queue.release()
 
     def size(self) -> int:

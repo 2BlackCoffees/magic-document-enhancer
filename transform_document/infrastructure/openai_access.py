@@ -2,6 +2,7 @@ from openai import OpenAI
 import time
 import os
 import re 
+from typing import List
 
 from infrastructure.generic_logger import GenericLogger
 from domain.iml_access import IMLAccess
@@ -18,15 +19,18 @@ class OpenAIAccess(IMLAccess):
         self.logger: GenericLogger = logger
         self.model_name = model_name
     
-    def try_transform_line(self, text_to_transform: str, how_to_transform: str, temperature: float, top_p: float) -> str:
+    def try_transform_line(self, text_to_transform: str, how_to_transform: List, temperature: float, top_p: float) -> str:
         user_assistant_msgs = [
             {"role": "user", 
-            "content": text_to_transform} 
+            "content": f'Transform the following text in double quotes  following strictly the associated detailed requests: "{text_to_transform}"'} 
         ]
 
-        messages = how_to_transform + user_assistant_msgs
+        messages: List = how_to_transform
+        messages.extend(user_assistant_msgs)
 
-        self.logger.log_trace(f'OpenAILineUpdateText.try_transform_line:\n model = {self.model_name}\n line_to_transform = {text_to_transform}\n how_to_transform = {how_to_transform}')
+        self.logger.log_trace(f'OpenAILineUpdateText.try_transform_line:\n'+\
+                              f' text_to_transform = {text_to_transform}\n '+\
+                              f' how_to_transform = {how_to_transform}')
 
         review = self.client.chat.completions.create(
             model=self.model_name,

@@ -79,59 +79,77 @@ class OpenPPTDocument(IOpenAndUpdateDocument):
             shape_descriptions: list = [] 
             for shape in slide.shapes:
                 if shape.has_text_frame:
-                    self.__append(shape_descriptions, PPTReader.get_text_box_info(slide_number, shape))
+                    self.__append(shape_descriptions, PPTReader.get_text_box_info(slide_number, shape, self))
  
                 elif shape.has_table: 
-                    pointer_list: List = []
                     table = shape.table
-                    table_str: str = ""
+                    pointer_list: List = [table]
+                    table_md_str: str = ""
                     first_row: bool = True
                     for row in table.rows:
-                        table_str += "\n|"
+                        table_md_str += "\n|"
                         for cell in row.cells:
                             text: str = ""
-                            pointer_list.append(cell.text_frame)
                             if cell.text_frame is not None:
                               text = cell.text_frame.text.replace("\n", " ")
-                            table_str += text + "|"
-                        if first_row: table_str += "\n" + ("-" * max(3, len(table_str)))
+                            table_md_str += text + "|"
+                        if first_row: table_md_str += "\n" + ("-" * max(3, len(table_md_str)))
                         first_row = False
                         
-                    self.__append(shape_descriptions, PPTReader.get_table_info(slide_number, shape, table_str, pointer_list))
+                    self.__append(shape_descriptions, PPTReader.get_table_info(slide_number, shape, table_md_str, pointer_list, self))
 
                 elif shape.shape_type == MSO_SHAPE_TYPE.GROUP: 
-                    self.__append(shape_descriptions, PPTReader.get_group_info(slide_number, shape))
+                    self.__append(shape_descriptions, PPTReader.get_group_info(slide_number, shape, self))
                
                 else: 
-                    self.__append(shape_descriptions, PPTReader.get_shape_type_info(slide_number, shape))
+                    self.__append(shape_descriptions, PPTReader.get_shape_type_info(slide_number, shape, self))
  
             title_value: str = None
             shape_title: Dict = None
             title_found: bool = False
             if hasattr(slide.shapes, "title") and hasattr(slide.shapes.title, "text") and \
-              slide.shapes.title.text is not None and len(slide.shapes.title.text) > 0:
+              slide.shapes.title.text is not None and self.is_paragraph(slide.shapes.title.text) > 0:
                 title_value = slide.shapes.title.text
                 for shape_description in shape_descriptions:
                     if shape_description["raw_text"] == title_value:
                         shape_title = shape_description
                         shape_title["json"]["is_title"] = True
                         title_found = True
-                if not title_found:
-                    shape_description: Dict = PPTReader.create_title(slide_number, slide.shapes.title)
+
+                        self.logger.log_trace(f"Recognized title from shape_description: {pformat(shape_title)}, title_value = {title_value}")
+                if (not title_found):
+                    shape_description: Dict = PPTReader.create_title(slide_number, slide.shapes.title, self)
                     shape_title = shape_description
                     shape_descriptions.append(shape_description)
+                    title_found = True
+                    self.logger.log_trace(f"Creating default title: {pformat(shape_description)}, slide.shapes.title = {slide.shapes.title}")
 
             sorted_shapes: List = PPTReader.get_sorted_shapes_by_pos_y(shape_descriptions)
 
             context: str = ""
             for shape_description in sorted_shapes:
-                context += shape_description['raw_text'] + "\n"
+                text = shape_description['raw_text']
+                if self.is_paragraph(text):
+                    if shape_description['json']['is_title'] == True:
+                        context += "# "
+                        context += text + "\n"
 
             for shape_description in sorted_shapes:
-                heading_mark: str = "# " if shape_description['json']['is_title'] else ""
-                self.worker.add_work_element(MetadataPpt(shape_description["json"]["pointers"], \
-                                                         context, \
-                                                         heading_mark + shape_description['raw_text']))   
+                if isinstance(shape_description['raw_text'], str):
+                    text: str = shape_description['raw_text']
+                    text = re.sub(r"^\s*$", "", text)
+                    if len(text) > 0:
+                        request_type: str = LLMUtils.DEFAULT_REQUEST
+                        if shape_description['json']['type'] == str(MSO_SHAPE_TYPE.TABLE):
+                            request_type = LLMUtils.TABLE_REQUEST
+                        if shape_description['json']['is_title'] == True:
+                            self.logger.log_trace(f"Adding heading {text}")
+                            request_type = LLMUtils.HEADING_REQUEST
+
+                        self.logger.log_trace(f"Populating requests: shape_description = {pformat(shape_description)}")
+                        self.worker.add_work_element(MetadataPpt(shape_description["json"]["pointers"], \
+                                                                context, text, \
+                                                                request_type, self.logger))   
             
     def process(self):
         self.__ppt_to_json()

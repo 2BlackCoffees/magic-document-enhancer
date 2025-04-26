@@ -184,15 +184,16 @@ class LLMUtils:
         for request in how_to_transform:
             if role in request and LLMUtils.ALL_REQUESTS in request:
                 if what_to_transform in request[LLMUtils.ALL_REQUESTS]:
+                    context: str = "\n".join( f"[{req}]" for req in request[LLMUtils.ALL_REQUESTS][what_to_transform].split('\n'))
                     final_request.append({
                         role: request[role], 
-                        "content": f'"{request[LLMUtils.ALL_REQUESTS][what_to_transform]}"'
+                        "content": context
                     })
                 else:
                     logger.log_error(f"Request type {pformat(what_to_transform)} does not exist in {pformat(how_to_transform)}, skipping it.")
             else:
                 final_request.append(request)
-            logger.log_trace(f"Request creation: {pformat(final_request)} for request: {pformat(request)}")
+        logger.log_trace(f"Request creation: {pformat(final_request)} from templated request: {pformat(request)}")
         return final_request
              
     def set_default_temperature_top_p_requests(self, list_requests: List, new_temperature: float, new_top_p: float) -> None:

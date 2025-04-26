@@ -50,7 +50,7 @@ class SerializedDocProcessorType(IProcessorType):
         return re.match(r'^\s*#.*$', initial_text) and len(initial_text.strip().split("\n")) <= 1
     
     def __get_heading_request(self, heading_text: str) -> str:
-        return f'[Process the request of the heading provided in double quotes and please ensure keeping one single line for the heading: "{heading_text}"]'
+        return f'[Process the request of the heading and please ensure keeping one single line for the heading] {heading_text}'
 
     
     def process_next(self) -> None:
@@ -59,13 +59,13 @@ class SerializedDocProcessorType(IProcessorType):
         context: str = metadata.get_context()
         request_type: str = metadata.get_request_type()
         request: str = ""
-        request_str: str = f'[Process the request of the heading provided in double quotes: "{text_to_transform}"]'
+        request_str: str = f'[Process the request of the heading] {text_to_transform}'
 
         if self.__is_single_line_heading(text_to_transform):
             request_str = self.__get_heading_request(text_to_transform)
 
         if self.__is_context_needed(context, text_to_transform):
-            request = f"[Considering the context: {context}], {request_str}"
+            request = f"[Considering the context: {context}] {request_str}"
         elif text_to_transform is not None and len(text_to_transform) > 0:
             request = self.__get_heading_request(text_to_transform)
         else:

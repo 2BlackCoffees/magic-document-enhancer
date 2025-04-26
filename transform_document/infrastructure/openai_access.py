@@ -22,7 +22,7 @@ class OpenAIAccess(IMLAccess):
     def try_transform_line(self, text_to_transform: str, how_to_transform: List, temperature: float, top_p: float) -> str:
         user_assistant_msgs = [
             {"role": "user", 
-            "content": f'Transform the following text in double quotes  following strictly the associated detailed requests: "{text_to_transform}"'} 
+            "content": f'[Transform the text following strictly the associated requests] {text_to_transform}'} 
         ]
 
         messages: List = how_to_transform

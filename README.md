@@ -162,7 +162,10 @@ While transforming a Word or Powerpoint document the styles in the document ofte
 
 # Improvements required
 Following is the list of improvements that this script will require:
-1. Handling styles of the destination document
-2. Work with KGPT team to ensure we are following properly the openai api: I was able to use openai endpoint with openai API however for some reasons that still need to be analyzed it required some workarounds when using KGPT endpoint.
-3. Temperature and Top_p despite provided to thr API do not seem to influence the generated output.
-4. Some refactoring is needed: Because I worked in my free time, I was not able to deliver the right level of quality.
+1. Handling PPT styles of the destination document
+2. Handling DOC styles of the generated documents: New paragraphs need to be cerated insteda of recycling existing ones
+3. Currently no check is performed on the number of tokens: This must be implemented because if the number of tokens is too high the request will fail. Instead we need to ensure we properly split the text or find solutions to cut a text in various parts and extract a summary out of it to be used as contaxt.
+4. Currently in Word only headings are used as context, we would need more details like a summary to guide KGPT.
+5. Work with KGPT team to ensure we are following properly the openai api: I was able to use openai endpoint with openai API however for some reasons that still need to be analyzed it required some workarounds when using KGPT endpoint.
+6. Temperature and Top_p despite provided to thr API do not seem to influence the generated output.
+7. Some refactoring is needed: Because I worked in my free time, I was not able to deliver the right level of quality.

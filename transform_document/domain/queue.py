@@ -63,9 +63,11 @@ class Metadata(ABC):
                         cell.text = md_table_list[row_id][col_id]
                         self.logger.log_trace(f"Updated cell (row_id:{row_id}, col_id: {col_id}) to {cell.text}")
                     else:
+                        error_message_list_table_row: str = len(md_table_list[row_id]) if row_id < len(md_table_list) else f"{row_id} is out of range (0 to {len(md_table_list)})"
                         self.logger.log_error(f"Could not update cell having initial value {cell.text} because of index out of range at coordinate (Row: {row_id}, Col: {col_id}):\n"+\
                                               f"  Doc Table size: Rows: {len(doc_table.rows)} x Cols: {len(doc_table.rows[row_id].cells)} and \n"+\
-                                              f"  List Table size: Rows: {len(md_table_list)} x Cols: {len(md_table_list[row_id])}")
+                                              f"  List Table size: Rows: {len(md_table_list)} x Cols: {error_message_list_table_row}.\n"+\
+                                              f"  Skipping cell!")
 
         else:
             self.logger.log_error(f"No table was registered for the context: {self.get_context()}\n"+\

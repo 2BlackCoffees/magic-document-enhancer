@@ -8,10 +8,21 @@
           },
           { 
             "role": "user", 
-            "content": 
-                  "- Please translate the document to french making it very clear for deep technical people. Please enhance technical explanations or technical words ensuring the text can be shared with a large technical audience.\n - Provide NO explanation of any change you perform.\n - Provide NO comment regarding any change.\n - Do NOT modify the meaning of the text.\n - If you cannot translate then provide the same text.\n"
+            "all_requests":
+            {
+              "default_request": 
+                    "- Please translate the text to french making it very clear for deep technical people.",
+              "table_request": 
+                    "- Please translate the table to french making it very clear for deep technical people.",
+              "heading_request": 
+                    "- Please translate the heading to french making it very clear for deep technical people."
+            
+            
+            }
           }
         ],
        "temperature": 0.2, "top_p": 0.4 
       }
 ]
+
+

@@ -192,9 +192,9 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
             for cell in row.cells:
                 self.logger.log_debug("Transforming DOC table to MD Table")
                 cell_value: str = ""
-                if len(cell.paragraphs > 0):
-                    cell_value = " ".join([paragraph_pointer.text for paragraph_pointer in cell.parahraphs]) + "\n"
-                    for paragraph_pointer in cell.parahraphs:
+                if len(cell.paragraphs) > 0:
+                    cell_value = " ".join([paragraph_pointer.text for paragraph_pointer in cell.paragraphs]) + "\n"
+                    for paragraph_pointer in cell.paragraphs:
                         paragraph_pointer.text = ""
                     
                 if len(cell.tables) > 0:
@@ -208,7 +208,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
             if first_row:
                 md_table = "\n" + "-" * len(md_table)
                 first_row = False
-        return md_table,
+        return md_table
 
     #TODO: All requests should be running in multiple threads
     def __fill_tasks(self, document: any):

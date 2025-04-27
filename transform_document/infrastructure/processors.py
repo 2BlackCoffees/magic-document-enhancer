@@ -3,6 +3,7 @@ from domain.llm_endpoint_request import LLMEndpointRequest
 from domain.queue import Queue, Metadata, ThreadSafeQueue
 from domain.logger import GenericLogger
 from domain.worker_class import IProcessorType
+from domain.llm_utils import LLMUtils
 from infrastructure.openai_access_multithreaded import MultithreadedAccess, Statistics, BackoffTimeHandler
 import threading
 import time
@@ -46,11 +47,12 @@ class SerializedDocProcessorType(IProcessorType):
             return context != initial_text
         return False
     
-    def __is_single_line_heading(self, initial_text: str) -> bool:
-        return re.match(r'^\s*#.*$', initial_text) and len(initial_text.strip().split("\n")) <= 1
+    def __is_single_line_heading(self, text_heading: str) -> bool:
+        self.logger.log_trace(f"__is_single_line_heading Heading {text_heading} ")
+        return re.match(r'^\s*#.*$', text_heading) and len(text_heading.strip().split("\n")) <= 1
     
     def __get_heading_request(self, heading_text: str) -> str:
-        return f'[Process the request of the heading and please ensure keeping one single line for the heading] {heading_text}'
+        return f'[Process the text as per request considering it is a heading and ensure keeping one single line for the heading] {heading_text}'
 
     
     def process_next(self) -> None:
@@ -59,23 +61,26 @@ class SerializedDocProcessorType(IProcessorType):
         context: str = metadata.get_context()
         request_type: str = metadata.get_request_type()
         request: str = ""
-        request_str: str = f'[Process the request of the heading] {text_to_transform}'
+        request_str: str = f'[Process the text as per request] {text_to_transform}'
 
-        if self.__is_single_line_heading(text_to_transform):
-            request_str = self.__get_heading_request(text_to_transform)
+        if request_type == LLMUtils.HEADING_REQUEST:
+            if self.__is_single_line_heading(text_to_transform) or (text_to_transform is not None and len(text_to_transform) > 0):
+                request_str = self.__get_heading_request(text_to_transform)
+        elif request_type == LLMUtils.TABLE_REQUEST:
+            request_str = f'[Process the table as per request and ensure keeping the STRICT same number of columns and rows] {text_to_transform}'
 
         if self.__is_context_needed(context, text_to_transform):
             request = f"[Considering the context: {context}] {request_str}"
-        elif text_to_transform is not None and len(text_to_transform) > 0:
-            request = self.__get_heading_request(text_to_transform)
+
         else:
             self.logger.log_info(f"Skipping request because context = >{context}<, initial_text = >{text_to_transform}<")
             return
 
-        self.logger.log_info(f'--\nRequest: {request}')
+        self.logger.log_info(f'Request sent to LLM: {request}')
         new_text = self.llm_request.transform_text(request, request_type)
-        self.logger.log_info(f'\nLLM response:\n{new_text}\n')
+        self.logger.log_info(f'\n  LLM response:\n{new_text}\n')
         metadata.update_llm_response_in_document(new_text, request_type)
+        self.logger.log_info(f'\n{"=" * 15}\n')
 
     def process_all(self) -> None:
         self.trigger_process_start()

@@ -281,7 +281,6 @@ class LLMUtils:
 
     def md_to_lists(md_table_str: str, logger: GenericLogger) -> List:
         logger.log_trace(f"Transforming MD table to list: {md_table_str}")
-        #lines: List = [re.sub(r'\|\s*$', '', re.sub(r'\|\|', '| |', line.strip())) for line in md_table_str.split("\n")]
         lines = [re.sub(r'^\s*\|', '', re.sub(r'\|\s*$', '', "| ".join(line.strip().split("|")))) for line in md_table_str.split("\n")]
         logger.log_trace(f"Table simplified to: {lines}")
 
@@ -292,10 +291,6 @@ class LLMUtils:
 
         for row_id, row in enumerate(table_from_csv):
             logger.log_trace(f"Analyzing row: {pformat(row)}")
-            # if not saved_headers:
-            #     md_table_list.append([value.strip() for value in list(row.keys())])
-            #     logger.log_trace(f"Appended headers {md_table_list}")
-            #     saved_headers = True
             row_values: List = []
             logger.log_trace(f"Updating row (row_id:{row_id}) from {list(row)}")
             for col_id, value in enumerate(row):

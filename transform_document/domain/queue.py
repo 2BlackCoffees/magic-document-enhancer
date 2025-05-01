@@ -3,6 +3,7 @@ from typing import List
 from dataclasses import dataclass
 import threading
 from pprint import pformat
+import re
 
 from domain.llm_utils import LLMUtils
 from domain.logger import GenericLogger
@@ -73,6 +74,11 @@ class Metadata(ABC):
             self.logger.log_error(f"No table was registered for the context: {self.get_context()}\n"+\
                                   "request:\n{self.get_text_to_transform()}\n")
 
+    def _delete_paragraph(self, paragraph_pointer):
+        p = paragraph_pointer._element
+        p.getparent().remove(p)
+        p._p = p._element = None
+
     def _update_text(self, text:str) -> None:
         # Split LLM transformation per paragraph and ensure that the number of paragraph returned by LLM 
         # does not exceed the original number of paragraphs
@@ -91,8 +97,86 @@ class Metadata(ABC):
 
 
 class MetadataDoc(Metadata):
+
     thread_lock_queue = threading.Lock()
 
+    def __init__(self, document_style: List, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger):
+        self.document_style: List = document_style
+        super().__init__(list_pointer_source_data, context, text_to_transform, request_type, logger)
+
+    def __paragraph_index(self, paragraph_pointer):
+        "Get the index of the paragraph in the document"
+        doc = paragraph_pointer._parent
+        # the paragraphs elements are being generated on the fly,
+        # they change all the time
+        # so in order to index, we must use the elements
+        l_elements = [p._element for p in doc.paragraphs]
+        return l_elements.index(paragraph_pointer._element)
+    
+    def __add_runs(self, new_paragraph: any, runs: List):
+        for want_bold, run_text in runs:
+            run = new_paragraph.add_run(run_text)
+            if want_bold: 
+                run.bold = True
+                self.logger.log_info(f"String {run_text} was set to bold")
+                
+    def __insert_paragraph_after(self, paragraph_pointer: any, runs: List, style=None):
+        doc = paragraph_pointer._parent
+        i = self.__paragraph_index(paragraph_pointer) + 1 # next
+        if i < len(doc.paragraphs):
+            # we find the next paragraph and we insert before:
+            next_paragraph = doc.paragraphs[i]
+            new_paragraph = next_paragraph.insert_paragraph_before('', style)
+        else:
+            # we reached the end, so we need to create a new one:
+            new_paragraph = doc.add_paragraph('', style)
+        self.__add_runs(new_paragraph, runs)
+
+        return new_paragraph
+
+    def _update_text(self, text: str) -> None:
+
+        if len(self.list_pointer_source_data) > 1:
+            for paragraph_pointer in self.list_pointer_source_data[1:]:
+                self._delete_paragraph(paragraph_pointer)
+        paragraphs = text.split("\n")
+        next_paragraph_pointer: any = self.list_pointer_source_data[0]
+        next_paragraph_style = next_paragraph_pointer.style
+      
+        for paragraph in paragraphs:
+            style_required_names: List = ['normal']
+            if re.search(r'^\s*[\*\-]([^\*]+|$)', paragraph):
+              style_required_names = ['bullet', 'list']
+            else:
+                match_heading = re.search(r'^\s*([#]+)[^#]+', paragraph)
+                if match_heading:
+                    heading_class: int = len(match_heading.group(1))
+                    if heading_class > 0:
+                        style_required_names = [f'heading {heading_class}']
+
+            runs: List = []
+            found_run: bool = True
+            current_run: str = paragraph
+            while found_run:
+                m_run = re.match(r'^(?P<before_bold>.*?)\*\*(?P<in_bold>.*?)\*\*(?P<after_bold>.*)$', current_run)
+                if m_run is None:
+                    found_run = False
+                    runs.append((False, current_run))
+                else:
+                    runs.append((False, m_run.group('before_bold')))
+                    runs.append((True, m_run.group('in_bold')))
+                    current_run = m_run.group('after_bold')
+                    #self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will have to be bold")
+
+            for style in self.document_style:
+                for style_required_name in style_required_names:
+                    if style_required_name.lower() in style.name.lower():
+                        next_paragraph_style = style
+                        break
+
+            self.logger.log_trace(f"The paragraph >{paragraph}< has style >{next_paragraph_style}< as defined by >{style_required_names}<")
+
+            next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs, next_paragraph_style)
 
     def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
         self.thread_lock_queue.acquire()

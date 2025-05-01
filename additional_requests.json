@@ -1,28 +1,47 @@
 [
-      {
-        "request_name": "Translate document to french", 
-        "how_to_transform": [
-          { 
-            "role": "system", 
-            "content": "You are a native french writer higly skilled to translate technical english text to french.\n"
-          },
-          { 
-            "role": "user", 
-            "all_requests":
-            {
-              "default_request": 
-                    "- Please translate the text to french making it very clear for deep technical people.",
-              "table_request": 
-                    "- Please translate the table to french making it very clear for deep technical people.",
-              "heading_request": 
-                    "- Please translate the heading to french making it very clear for deep technical people."
-            
-            
-            }
-          }
-        ],
-       "temperature": 0.2, "top_p": 0.4 
+  {
+    "request_name": "Translate document to french", 
+    "how_to_transform": [
+      { 
+        "role": "system", 
+        "content": "You are a native french writer higly skilled to translate technical english text to french.\n"
+      },
+      { 
+        "role": "user", 
+        "all_requests":
+        {
+          "default_request": "- Please translate the text to french making it very clear for deep technical people.",
+          "table_request": "- Please translate the table to french making it very clear for deep technical people.",
+          "heading_request": "- Please translate the heading to french making it very clear for deep technical people."
+        
+        
+        }
       }
+    ],
+   "temperature": 0.2, "top_p": 0.4 
+  },
+  {
+    "request_name": "Test bold", 
+    "how_to_transform": [
+      { 
+        "role": "system", 
+        "content": "You are a native english writer higly skilled to transform technical english text emphasing words or expressions in bold.\n"
+      },
+      { 
+        "role": "user", 
+        "all_requests":
+        {
+          "default_request": "- Please emphazise the text in bold to catch sales people attention.",
+          "table_request": "- Please emphazise the text in bold to catch sales people attention.",
+          "heading_request": "- Please emphazise the text in bold to catch sales people attention."
+        
+        
+        }
+      }
+    ],
+   "temperature": 0.2, "top_p": 0.4 
+  }
+
 ]
 
 

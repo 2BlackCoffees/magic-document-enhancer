@@ -221,6 +221,7 @@ class LLMUtils:
     def __read_json(self, filename: str):
         path = Path(filename)
         if path.is_file():
+            self.logger.log_info(f"Opening external request file: {filename}")
             with open(filename) as f:
                 return json.load(f)
         return []

@@ -8,6 +8,7 @@ from domain.worker_class import Worker
 from domain.queue import MetadataDoc
 from infrastructure.open_microsoft_document import IOpenAndUpdateDocument
 from infrastructure.generic_logger import GenericLogger
+from docx.enum.style import WD_STYLE_TYPE
 
 class OpenDOCDocument(IOpenAndUpdateDocument):
     HEADING_NAME: str = "Heading name"
@@ -25,6 +26,12 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                          paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
                          logger)
         self.document =  Document(document_path)
+        self.document_styles: List = [
+            s for s in self.document.styles if s.type == WD_STYLE_TYPE.PARAGRAPH
+        ]
+        self.logger.log_info("Styles found in document:")
+        for style in self.document_styles:
+            self.logger.log_info(f' * {style.name}')
 
     def __get_heading_deepness(self, heading_style) -> int:
         regexp = re.compile(r'^heading\s+(\d+)')
@@ -173,7 +180,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                     prev_headings.append(heading_name)
 
 
-                self.worker.add_work_element(MetadataDoc(list_pointers, \
+                self.worker.add_work_element(MetadataDoc(self.document_styles, list_pointers, \
                                                          "\n".join(prev_headings), \
                                                          section_text,
                                                          request_type,
@@ -219,7 +226,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
         for doc_table in document.tables:
             md_table = self.__doc_table_to_md_table(doc_table)
             # In word dpcument we are going to replace a table 
-            self.worker.add_work_element(MetadataDoc([doc_table], \
+            self.worker.add_work_element(MetadataDoc(self.document_styles, [doc_table], \
                                                       "\n".join(prev_headings), \
                                                       md_table,
                                                       LLMUtils.TABLE_REQUEST,

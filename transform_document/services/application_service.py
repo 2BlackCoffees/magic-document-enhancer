@@ -1,18 +1,20 @@
 import re
 import os
 from typing import Dict, List
-from infrastructure.open_microsoft_document import OpenXLSDocument
-from infrastructure.open_ppt_document import OpenPPTDocument
-from infrastructure.open_doc_document import OpenDOCDocument
+from pathlib import Path
+
 from domain.iopen_document import IOpenDocument
 from domain.llm_endpoint_request import LLMEndpointRequest
 from domain.worker_class import IProcessorType, Worker, MultithreadedWorkers
 from domain.llm_utils import LLMUtils
+from domain.iml_access import IMLAccess
+from infrastructure.open_microsoft_document import OpenXLSDocument
+from infrastructure.open_ppt_document import OpenPPTDocument
+from infrastructure.open_doc_document import OpenDOCDocument
 from infrastructure.processors import SerializedDocProcessorType, SerializedSynchronizedDocProcessorType
 from infrastructure.generic_logger import GenericLogger
 from infrastructure.openai_access import OpenAIAccess
 from infrastructure.openai_debug_access import OpenAIDebugAccess
-from domain.iml_access import IMLAccess
 
 class ApplicationService:
     def __init__(self, 
@@ -27,7 +29,8 @@ class ApplicationService:
                  logger: GenericLogger,
                  use_debugger_ai: bool = False,
                  slides_to_skip: List = None,
-                 slides_to_keep: List = None):
+                 slides_to_keep: List = None,
+                 context_path: str = None):
         
         self.logger: GenericLogger = logger
         self.to_document = to_document
@@ -42,14 +45,28 @@ class ApplicationService:
         logger.log_info(f'Transforming from {document_path} to {to_document}.')
         if len(slides_to_skip) > 0: logger.log_info(f'Slides to skip: {slides_to_skip}.')
         if len(slides_to_keep) > 0: logger.log_info(f'Slides to keep: {slides_to_keep}.')
-        
-        if re.search(r'\.doc[\w]*$', document_path):
+        force_context_content: List = None
+        if context_path is not None:
             logger.log_info("Handling word document")
+            path = Path(context_path)
+            if path.is_file():
+                self.logger.log_info(f"Opening external request file: {context_path}")
+                with open(context_path) as f:
+                    force_context_content = f.readlines()
+                    self.logger.log_info(f"Using context provided in command line through filename {context_path}:\n{force_context_content}")
+            else:
+                self.logger.log_warn(f"File {context_path} could not be read.")
+
+        if force_context_content is None:
+            self.logger.log_info(f"Headings of the document will be used as context.")
+
+        if re.search(r'\.doc[\w]*$', document_path):
 
             self.open_document = OpenDOCDocument(document_path, 
                                                  worker, 
                                                  paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
-                                                 logger)
+                                                 logger,
+                                                 force_context_content)
         elif re.search(r'\.xls[\w]*$', document_path):
             logger.log_info("Handling XLS document")
             self.open_document = OpenXLSDocument(document_path, 

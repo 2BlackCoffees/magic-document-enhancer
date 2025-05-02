@@ -48,7 +48,7 @@ def main() -> None:
     logger_type: LoggerType = LoggerType.INFO
     use_debugger_ai: bool = False
     csv_ = partial(str.split, sep=',')
-
+    context_path: str = None
     debug: bool = True
     if debug:
         #engine="gpt-4"
@@ -66,6 +66,8 @@ def main() -> None:
     parser.add_argument('--transformation', type=int, help=f'Specify one transformation request to process from the following list: [[ {llm_utils.get_all_requests_and_ids_str()} ]]')
     parser.add_argument('--skip_slides', type=csv_, help='For ppt(x) documents only: Specify slides to skip: 1,2-5,8: Cannot be used with only_slides')
     parser.add_argument('--only_slides', type=csv_, help='For ppt(x) documents only: Specify slides to keep: 1,2-5,8: Cannot be used with skip_slides')
+    parser.add_argument('--context_path', type=str, help='Path to a text file (whatever extension) where the contect of the document is described. If not orovided, headings will be used as context.')
+
 
     parser.add_argument('--paragraph_start_min_word_numbers', type=str, help=f'When defining the start of a line or paragraph this defines the minimum number of words ({paragraph_start_min_word_numbers} per default)', required=False)
     parser.add_argument('--paragraph_start_min_word_length', type=str, help=f'When defining the start of a line or paragraph this defines the minimum number of chars in each of the initial words ({paragraph_start_min_word_length} per default)', required=False)
@@ -124,6 +126,8 @@ def main() -> None:
     if args.use_debugger_ai:
         use_debugger_ai = args.use_debugger_ai
 
+    if args.context_path:
+        context_path = args.context_path
     if args.to_document:
         to_document = args.to_document
     else:
@@ -149,7 +153,8 @@ def main() -> None:
         logger,
         use_debugger_ai,
         slides_to_skip,
-        slides_to_keep)
+        slides_to_keep,
+        context_path)
     
     application_service.process()
     ended_epoch: datetime.date = datetime.now()

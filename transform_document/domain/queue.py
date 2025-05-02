@@ -133,50 +133,106 @@ class MetadataDoc(Metadata):
         self.__add_runs(new_paragraph, runs)
 
         return new_paragraph
+    
+    def __update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
+        current_style: any = paragraph_pointer.style
+        self.__add_runs(paragraph_pointer, runs)    
+        paragraph_pointer.style = current_style
 
+    def __split_paragraph(self, paragraphs: List, idx_paragraph: int, split_char: str = '.'):
+        paragraph: str = paragraphs[idx_paragraph]
+        first_paragraphs: List = paragraph.split(split_char)
+        self.logger.log_trace(f"Heading {paragraph} index {idx_paragraph} divided in {first_paragraphs}")
+        if len(first_paragraphs) > 1:
+            paragraphs[idx_paragraph] = '.'.join(first_paragraphs[1:])
+            paragraphs.insert(idx_paragraph, first_paragraphs[0])
+            self.logger.log_trace(f"Heading reduced to {paragraphs[0]}")
+            # We shoud not have a ':' in a heading
+            if ':' in paragraphs[0]: 
+                self.__split_paragraph(paragraphs, idx_paragraph, ':')
+
+    def __get_style_from_style_name(self, style_required_names: List):
+        # Use style normal per default
+        if "normal" not in style_required_names:
+            style_required_names.append("normal")
+        for style_required_name in style_required_names:
+            for style in self.document_style:
+                if style.name.lower().startswith(style_required_name.lower()):
+                    self.logger.log_trace(f"Using style {style} as found from {style_required_name}")
+                    return style
+            self.logger.log_trace(f"Style {style_required_name} not found in {self.document_style}")
+
+
+        self.logger.log_trace(f"None of the requested styles: {style_required_names} were found in {self.document_style}")
+        return None
+    
     def _update_text(self, text: str) -> None:
+
+        paragraphs: List = text.split("\n")
+        # Sometimes LLM returms a very long heading that should actually be a heading followed by a paragraph
+        for idx_paragraph in range(len(paragraphs)-1, -1, -1):
+            paragraph: str = paragraphs[idx_paragraph]
+            self.logger.log_trace(f"Checking {paragraph} index {idx_paragraph}, checking if it is a title")
+            if re.search(r'^\s*#', paragraph):
+                self.__split_paragraph(paragraphs, idx_paragraph)
+        
+        self.logger.log_trace(f"len(paragraphs) {len(paragraphs)}, {paragraphs} len(self.list_pointer_source_data) {len(self.list_pointer_source_data)}, {self.list_pointer_source_data}")
+        if len(paragraphs) > 0 and len(self.list_pointer_source_data) > 0:
+            self.list_pointer_source_data[0].text = ""
+            self.logger.log_trace(f"Checking style of existing paragraph {paragraph} style {self.list_pointer_source_data[0].style.name}")
+            if(self.list_pointer_source_data[0].style.name.lower().startswith("heading ")):
+                self.__split_paragraph(paragraphs, 0)
 
         if len(self.list_pointer_source_data) > 1:
             for paragraph_pointer in self.list_pointer_source_data[1:]:
                 self._delete_paragraph(paragraph_pointer)
-        paragraphs = text.split("\n")
         next_paragraph_pointer: any = self.list_pointer_source_data[0]
         next_paragraph_style = next_paragraph_pointer.style
       
-        for paragraph in paragraphs:
-            style_required_names: List = ['normal']
-            if re.search(r'^\s*[\*\-]([^\*]+|$)', paragraph):
-              style_required_names = ['bullet', 'list']
-            else:
-                match_heading = re.search(r'^\s*([#]+)[^#]+', paragraph)
+        for paragraph_id, paragraph in enumerate(paragraphs):
+
+            # We keep style of first paragraph
+            if paragraph_id > 0:
+
+                style_required_names: List = ['normal']
+
+                match_heading = re.search(r'^\s*(?P<heading_deepness>[#]+)[^#]+', paragraph)
                 if match_heading:
-                    heading_class: int = len(match_heading.group(1))
+                    heading_class: int = len(match_heading.group('heading_deepness'))
                     if heading_class > 0:
                         style_required_names = [f'heading {heading_class}']
 
-            runs: List = []
+                elif re.search(r'^\s*[\*\-]([^\*]+|$)', paragraph):
+                    style_required_names = ['bullet ', 'list ']
+
+                new_style: any = self.__get_style_from_style_name(style_required_names)
+                if new_style is not None: 
+                    next_paragraph_style = new_style
+
+                self.logger.log_trace(f"The paragraph >{paragraph}< has style >{next_paragraph_style}< as defined by >{style_required_names}<")
+            paragraph = re.sub(r'^\s*[#]+\s*', '', paragraph)
+            self.logger.log_trace(f"The paragraph >{paragraph}< was cleaned of heading marking if any were present")
+
+            runs_boldstyle_text: List = []
             found_run: bool = True
             current_run: str = paragraph
             while found_run:
                 m_run = re.match(r'^(?P<before_bold>.*?)\*\*(?P<in_bold>.*?)\*\*(?P<after_bold>.*)$', current_run)
                 if m_run is None:
                     found_run = False
-                    runs.append((False, current_run))
+                    runs_boldstyle_text.append((False, current_run))
                 else:
-                    runs.append((False, m_run.group('before_bold')))
-                    runs.append((True, m_run.group('in_bold')))
+                    runs_boldstyle_text.append((False, m_run.group('before_bold')))
+                    runs_boldstyle_text.append((True, m_run.group('in_bold')))
                     current_run = m_run.group('after_bold')
-                    #self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will have to be bold")
+                    self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will be bold")
+            
 
-            for style in self.document_style:
-                for style_required_name in style_required_names:
-                    if style_required_name.lower() in style.name.lower():
-                        next_paragraph_style = style
-                        break
 
-            self.logger.log_trace(f"The paragraph >{paragraph}< has style >{next_paragraph_style}< as defined by >{style_required_names}<")
-
-            next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs, next_paragraph_style)
+            if paragraph_id > 0:
+                next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs_boldstyle_text, next_paragraph_style)
+            else:
+                self.__update_paragraph_in_place(next_paragraph_pointer, runs_boldstyle_text)
 
     def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
         self.thread_lock_queue.acquire()

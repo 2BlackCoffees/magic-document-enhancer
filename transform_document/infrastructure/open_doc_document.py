@@ -17,19 +17,18 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
     PARAGRAPH_POINTERS: str = "Paragraph Pointers"
     INIT_HEADING = "no heading"
     def __init__(self, 
-                 document_path: str, 
+                 document_path: str,
                  worker: Worker, 
                  paragraph_start_min_word_numbers: int,
                  paragraph_start_min_word_length: int, 
-                 logger: GenericLogger):
+                 logger: GenericLogger,  force_context: str = None):
         super().__init__(document_path, worker, 
                          paragraph_start_min_word_numbers, paragraph_start_min_word_length, 
                          logger)
         self.document =  Document(document_path)
-        self.document_styles: List = [
-            s for s in self.document.styles if s.type == WD_STYLE_TYPE.PARAGRAPH
-        ]
+        self.document_styles: List = [ s for s in self.document.styles if s.type in [WD_STYLE_TYPE.PARAGRAPH, WD_STYLE_TYPE.LIST] ]
         self.logger.log_info("Styles found in document:")
+        self.force_context = force_context
         for style in self.document_styles:
             self.logger.log_info(f' * {style.name}')
 
@@ -179,9 +178,9 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                         section_text = heading_name + "\n" + section_text
                     prev_headings.append(heading_name)
 
-
+                context: str = "\n".join(self.force_context if self.force_context is not None else prev_headings)
                 self.worker.add_work_element(MetadataDoc(self.document_styles, list_pointers, \
-                                                         "\n".join(prev_headings), \
+                                                         context, \
                                                          section_text,
                                                          request_type,
                                                          self.logger))
@@ -225,9 +224,11 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
 
         for doc_table in document.tables:
             md_table = self.__doc_table_to_md_table(doc_table)
+            context: str = "\n".join(self.force_context if self.force_context is not None else self.prev_headings)
+
             # In word dpcument we are going to replace a table 
             self.worker.add_work_element(MetadataDoc(self.document_styles, [doc_table], \
-                                                      "\n".join(prev_headings), \
+                                                      context, \
                                                       md_table,
                                                       LLMUtils.TABLE_REQUEST,
                                                       self.logger

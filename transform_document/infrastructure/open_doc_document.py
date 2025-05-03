@@ -160,6 +160,13 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
         self.logger.log_debug(pformat(file_content))
         return file_content
     
+    def __get_context(self, prev_headings: List) -> str:
+        if self.force_context is not None:
+            return "\n".join(self.force_context)  
+        else: 
+            return "The context is a list of headings belonging to the document. This list is intended to provide guidance to the LLM:" +\
+                      "\n".join(prev_headings)  
+
     def __dispatch_requests(self, file_content: List, prev_headings: List):
         for section in file_content:
             heading_name: str = None
@@ -178,7 +185,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                         section_text = heading_name + "\n" + section_text
                     prev_headings.append(heading_name)
 
-                context: str = "\n".join(self.force_context if self.force_context is not None else prev_headings)
+                context: str = self.__get_context(prev_headings)
                 self.worker.add_work_element(MetadataDoc(self.document_styles, list_pointers, \
                                                          context, \
                                                          section_text,
@@ -224,7 +231,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
 
         for doc_table in document.tables:
             md_table = self.__doc_table_to_md_table(doc_table)
-            context: str = "\n".join(self.force_context if self.force_context is not None else self.prev_headings)
+            context: str = self.__get_context(prev_headings)
 
             # In word dpcument we are going to replace a table 
             self.worker.add_work_element(MetadataDoc(self.document_styles, [doc_table], \

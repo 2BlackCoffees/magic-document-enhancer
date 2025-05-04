@@ -134,6 +134,7 @@ class OpenPPTDocument(IOpenAndUpdateDocument):
                         context += "# "
                         context += text + "\n"
 
+            self.logger.log_trace(f"Transformed slide {slide_idx}, {slide}:\n{pformat(sorted_shapes)}")
             for shape_description in sorted_shapes:
                 if isinstance(shape_description['raw_text'], str):
                     text: str = shape_description['raw_text']

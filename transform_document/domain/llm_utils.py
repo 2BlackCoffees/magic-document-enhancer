@@ -193,7 +193,8 @@ class LLMUtils:
                     logger.log_error(f"Request type {pformat(what_to_transform)} does not exist in {pformat(how_to_transform)}, skipping it.")
             else:
                 final_request.append(request)
-        logger.log_trace(f"Request creation: {pformat(final_request)} from templated request: {pformat(request)}")
+        logger.log_trace(f'Request creation:\n{"-" * 16}\n{pformat(final_request)}')
+        logger.log_trace(f"  from templated request: {pformat(request)}")
         return final_request
              
     def set_default_temperature_top_p_requests(self, list_requests: List, new_temperature: float, new_top_p: float) -> None:

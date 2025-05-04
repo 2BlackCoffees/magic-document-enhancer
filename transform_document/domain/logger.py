@@ -22,7 +22,12 @@ class Logger(GenericLogger):
 
     def __print_splitted(self, logger_type: str, line: str):
         for sub_line in line.split('\n'):
-            print(f'{logger_type}: {sub_line}')
+            try:
+                print(f'{logger_type}: {sub_line}')
+            except Exception as inst:
+                print(f'{inst}, printing in UTF-8:')
+                print(f'{logger_type}: In UTF-8: {sub_line.encode("utf-8")}')
+                
 
     def log_info(self, line: str) -> None:
         if self.info:

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 from dataclasses import dataclass
 import threading
 from pprint import pformat
@@ -31,6 +31,8 @@ class Metadata(ABC):
         self.request_type = request_type
         self.logger = logger
         self.logger.log_trace(f"Add metadata of request type {request_type}, text_to_transform: {text_to_transform}")
+        # Will have to be moved to MetadaWindows
+        self.use_paragraph_style = False
 
     def get_text_to_transform(self) -> str:
         return self.text_to_transform
@@ -49,6 +51,13 @@ class Metadata(ABC):
         """
         """
 
+
+
+class MetadataWindows(Metadata):
+    # Needs to be overriden if a different behaviour is expected
+    def _get_pointer_to_text(self, pointer: any)-> any:
+        return pointer
+
     def _update_table(self, md_table_text: str) -> None:
         if len(self.list_pointer_source_data) > 0:
             doc_table: any = self.list_pointer_source_data[0]
@@ -61,8 +70,19 @@ class Metadata(ABC):
             for row_id, row in enumerate(doc_table.rows):
                 for col_id, cell in enumerate(row.cells):
                     if row_id < len(md_table_list) and col_id < len(md_table_list[row_id]):
-                        cell.text = md_table_list[row_id][col_id]
-                        self.logger.log_trace(f"Updated cell (row_id:{row_id}, col_id: {col_id}) to {cell.text}")
+                        self.logger.log_trace(f"Updating cell (row_id:{row_id}, col_id: {col_id}) from {cell.text} to {md_table_list[row_id][col_id]}")
+                        paragraph: any = cell
+                        if hasattr(cell, "paragraphs"):
+                            if len(cell.paragraphs) == 0:
+                                paragraph = cell.add_paragraph()
+                            else:
+                                while len(paragraph.paragraphs) > 1:
+                                    self._delete_paragraph(paragraph.paragraphs[-1])
+                                paragraph = cell.paragraphs[0]
+                            
+                        self._update_paragraph(paragraph, md_table_list[row_id][col_id])
+                        #cell.text = md_table_list[row_id][col_id]
+                        self.logger.log_trace(f"Updated cell (row_id:{row_id}, col_id: {col_id}) is now {cell.text} ({md_table_list[row_id][col_id]})")
                     else:
                         error_message_list_table_row: str = len(md_table_list[row_id]) if row_id < len(md_table_list) else f"{row_id} is out of range (0 to {len(md_table_list)})"
                         self.logger.log_error(f"Could not update cell having initial value {cell.text} because of index out of range at coordinate (Row: {row_id}, Col: {col_id}):\n"+\
@@ -76,16 +96,97 @@ class Metadata(ABC):
 
     def _delete_paragraph(self, paragraph_pointer):
         p = paragraph_pointer._element
-        p.getparent().remove(p)
-        p._p = p._element = None
+        parent = p.getparent()
+        if parent is not None:
+            p.getparent().remove(p)
+            p._p = p._element = None
+        else:
+            self.logger.log_warn(f"Paragraph {paragraph_pointer.text} could not be deleted.")
+            paragraph_pointer.text = ""
+    
+    # TODO: Has to be part of refactoring
+    def _add_runs(self, new_paragraph: any, runs: List, style: any = None):
+        for want_bold, run_text in runs:
+            run = new_paragraph.add_run()
+            run.text = run_text
+            self.logger.log_trace(f"Text >{run_text}< was added to paragraph, initial style: Font name: '{run.font.name}', Font size: {run.font.size}, Underlines: {run.font.underline}, Bold: {run.font.bold}, Italic: {run.font.italic}")
+            if style is not None:
+                self._set_paragraph_style(run, style)
+                self.logger.log_trace(f"Style updated to: Font name: '{run.font.name}', Font size: {run.font.size}, Underlines: {run.font.underline}, Bold: {run.font.bold}, Italic: {run.font.italic}, want_bold: {want_bold}")
+            if want_bold: 
+                run.font.bold = True
+                self.logger.log_trace(f"Text {run_text} was set to bold")
+
+    # TODO: Has to be part of refactoring
+    def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
+        current_style: any = self._get_paragraph_style(paragraph_pointer)
+        paragraph_pointer.text = ""
+        if hasattr(paragraph_pointer, "_parent") and hasattr(paragraph_pointer._parent, "paragraphs"):
+            for doc_idx, doc in enumerate(paragraph_pointer._parent.paragraphs):
+                doc.text = ""
+                # TODO: To be analyzed on the long term as this could make the file unreadable
+                if doc_idx > 0:
+                    self._delete_paragraph(doc)
+
+        self._add_runs(paragraph_pointer, runs, current_style)    
+
+    # TODO: Mind code duplication in MetadataDoc
+    def _transform_paragraph_to_runs(self, paragraph: str) -> Tuple:
+        runs_boldstyle_text: List = []
+        for current_run in paragraph.split('\n'):
+            if len(current_run) == 0 or current_run == '\n':
+                continue
+            current_run += '\n'
+            found_run: bool = True
+            self.logger.log_trace(f"Checking for bold text in >{current_run}<.")
+            while found_run:
+                m_run = re.match(r'^(?P<before_bold>.*?)\*\*(?P<in_bold>.*?)\*\*(?P<after_bold>.*)$', current_run)
+                if m_run is None:
+                    found_run = False
+                    runs_boldstyle_text.append((False, current_run))
+                    self.logger.log_trace(f"The text >{current_run}< has no MD bold requirement.")
+                else:
+                    runs_boldstyle_text.append((False, m_run.group('before_bold')))
+                    runs_boldstyle_text.append((True, m_run.group('in_bold')))
+                    current_run = m_run.group('after_bold')
+                    self.logger.log_trace(f"The text >{m_run.group('before_bold')}< will NOT be bold")
+                    self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will be bold")
+                    self.logger.log_trace(f"The text >{m_run.group('after_bold')}< will NOT be bold")
+            style, text = runs_boldstyle_text[-1]
+            if not text.endswith('\n'):
+                runs_boldstyle_text[-1] = (style, text + '\n')
+                                 
+        return runs_boldstyle_text
+
+    def _get_paragraph_style(self, pointer: any) -> Tuple:
+        self.logger.log_trace(f"Pointer: {dir(pointer)}")
+        if not self.use_paragraph_style and hasattr(pointer, 'runs') and len(pointer.runs) > 0:
+            pointer = pointer.runs[0]
+            self.logger.log_trace(f"Using runs instead of initial pointer: {dir(pointer)}")
+
+        return(pointer.font.name, 
+               pointer.font.size,
+               pointer.font.underline,
+               pointer.font.bold,
+               pointer.font.italic)
+
+    def _set_paragraph_style(self, pointer: any, style: Tuple):
+        pointer.font.name,      \
+        pointer.font.size,      \
+        pointer.font.underline, \
+        pointer.font.bold,      \
+        pointer.font.italic = style
+
 
     def _update_text(self, text:str) -> None:
         # Split LLM transformation per paragraph and ensure that the number of paragraph returned by LLM 
         # does not exceed the original number of paragraphs
         paragraphs = text.split("\n")
+        self.logger.log_trace(f"len(paragraphs): {len(paragraphs)}, len(self.list_pointer_source_data): {len(self.list_pointer_source_data)}, paragraphs: {pformat(paragraphs)}")
         while (len(paragraphs) > 1 and len(paragraphs) > len(self.list_pointer_source_data)):
             paragraphs[-2] += "\n" + paragraphs[-1]
-            paragraphs = paragraphs[0:len(paragraphs) - 1]
+            paragraphs = paragraphs[:len(paragraphs) - 2]
+            self.logger.log_trace(f"len(paragraphs): {len(paragraphs)}, len(self.list_pointer_source_data): {len(self.list_pointer_source_data)}, paragraphs: {pformat(paragraphs)}")
         if len(paragraphs) > len(self.list_pointer_source_data):
             self.logger.log_warn(f"len(paragraphs) ({len(paragraphs)}) > len(self.list_pointer_source_data) ({len(self.list_pointer_source_data)})")
         for index in range(min(len(paragraphs), len(self.list_pointer_source_data))):
@@ -95,14 +196,35 @@ class Metadata(ABC):
         for index in range(len(paragraphs), len(self.list_pointer_source_data)):
              self.list_pointer_source_data[index].text = ""
 
+    # TODO: Use this method in word and PPT every where
+    def _update_paragraph(self, paragraph_pointer: any, new_paragraph_text: str) -> any:
+        updated_paragraph_pointer = self._get_pointer_to_text(paragraph_pointer)
+        if hasattr(updated_paragraph_pointer, "text"):
+            self.logger.log_trace(f"Updating paragraph from {updated_paragraph_pointer.text} to {new_paragraph_text}")
+        if updated_paragraph_pointer is not None:
+            runs_style_text: List = self._transform_paragraph_to_runs(new_paragraph_text)
+            self._update_paragraph_in_place(updated_paragraph_pointer, runs_style_text)
+        else:
+            self.logger.log_warn(f"New text: {new_paragraph_text} could not be updated, pointer is {paragraph_pointer}")
 
-class MetadataDoc(Metadata):
+
+class MetadataDoc(MetadataWindows):
 
     thread_lock_queue = threading.Lock()
 
     def __init__(self, document_style: List, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger):
         self.document_style: List = document_style
         super().__init__(list_pointer_source_data, context, text_to_transform, request_type, logger)
+
+    def _add_runs(self, new_paragraph: any, runs: List):
+        for want_bold, run_text in runs:
+            # Skip empty lines (Will lead to more dense document)
+            if not re.match(r'^\s*$', run_text):
+                run_text = run_text.replace('\n', ' ')
+                run = new_paragraph.add_run(run_text)
+                if want_bold: 
+                    run.bold = True
+                    self.logger.log_trace(f"String {run_text} was set to bold")
 
     def __paragraph_index(self, paragraph_pointer):
         "Get the index of the paragraph in the document"
@@ -112,14 +234,8 @@ class MetadataDoc(Metadata):
         # so in order to index, we must use the elements
         l_elements = [p._element for p in doc.paragraphs]
         return l_elements.index(paragraph_pointer._element)
-    
-    def __add_runs(self, new_paragraph: any, runs: List):
-        for want_bold, run_text in runs:
-            run = new_paragraph.add_run(run_text)
-            if want_bold: 
-                run.bold = True
-                self.logger.log_info(f"String {run_text} was set to bold")
-                
+
+                    
     def __insert_paragraph_after(self, paragraph_pointer: any, runs: List, style=None):
         doc = paragraph_pointer._parent
         i = self.__paragraph_index(paragraph_pointer) + 1 # next
@@ -130,14 +246,17 @@ class MetadataDoc(Metadata):
         else:
             # we reached the end, so we need to create a new one:
             new_paragraph = doc.add_paragraph('', style)
-        self.__add_runs(new_paragraph, runs)
+        self._add_runs(new_paragraph, runs)
 
         return new_paragraph
-    
-    def __update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
-        current_style: any = paragraph_pointer.style
-        self.__add_runs(paragraph_pointer, runs)    
-        paragraph_pointer.style = current_style
+
+    def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
+        if hasattr(paragraph_pointer, "style"):
+            current_style: any = paragraph_pointer.style
+            self._add_runs(paragraph_pointer, runs)    
+            paragraph_pointer.style = current_style
+        else:
+            super()._update_paragraph_in_place(paragraph_pointer, runs)
 
     def __split_paragraph(self, paragraphs: List, idx_paragraph: int, split_char: str = '.'):
         paragraph: str = paragraphs[idx_paragraph]
@@ -212,27 +331,28 @@ class MetadataDoc(Metadata):
                 self.logger.log_trace(f"The paragraph >{paragraph}< has style >{next_paragraph_style}< as defined by >{style_required_names}<")
             paragraph = re.sub(r'^\s*[#]+\s*', '', paragraph)
             self.logger.log_trace(f"The paragraph >{paragraph}< was cleaned of heading marking if any were present")
-
-            runs_boldstyle_text: List = []
+            
+            # TODO: this code should be replaced with _transform_paragraph_to_runs
+            runs_style_text: List = []
             found_run: bool = True
             current_run: str = paragraph
             while found_run:
                 m_run = re.match(r'^(?P<before_bold>.*?)\*\*(?P<in_bold>.*?)\*\*(?P<after_bold>.*)$', current_run)
                 if m_run is None:
                     found_run = False
-                    runs_boldstyle_text.append((False, current_run))
+                    runs_style_text.append((False, current_run))
                 else:
-                    runs_boldstyle_text.append((False, m_run.group('before_bold')))
-                    runs_boldstyle_text.append((True, m_run.group('in_bold')))
+                    runs_style_text.append((False, m_run.group('before_bold')))
+                    runs_style_text.append((True, m_run.group('in_bold')))
                     current_run = m_run.group('after_bold')
                     self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will be bold")
-            
 
+            #runs_style_text: List = self._transform_paragraph_to_runs(paragraph)
 
             if paragraph_id > 0:
-                next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs_boldstyle_text, next_paragraph_style)
+                next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs_style_text, next_paragraph_style)
             else:
-                self.__update_paragraph_in_place(next_paragraph_pointer, runs_boldstyle_text)
+                self._update_paragraph_in_place(next_paragraph_pointer, runs_style_text)
 
     def update_llm_response_in_document(self, text: str, request_tyoe: str) -> None: 
         self.thread_lock_queue.acquire()
@@ -243,7 +363,7 @@ class MetadataDoc(Metadata):
             self._update_table(text)
         self.thread_lock_queue.release() 
 
-class MetadataXls(Metadata):
+class MetadataXls(MetadataWindows):
     thread_lock_queue = threading.Lock()
 
     def get_text_to_transform(self) -> str:
@@ -253,7 +373,7 @@ class MetadataXls(Metadata):
         self.list_pointer_source_data.value = text
         self.thread_lock_queue.release() 
 
-class MetadataPpt(Metadata):
+class MetadataPpt(MetadataWindows):
     thread_lock_queue = threading.Lock()
 
 
@@ -265,6 +385,43 @@ class MetadataPpt(Metadata):
         else:
             self._update_table(text)
         self.thread_lock_queue.release() 
+
+    def _get_pointer_to_text(self, pointer: any)-> any:
+        self.logger.log_trace(f"_get_pointer_to_text, pointer has attributes {format(dir(pointer))}")
+        new_pointer: any = None
+        if hasattr(pointer, "title"): 
+            new_pointer =  pointer.title
+            self.logger.log_trace(f"Found title as pointer with attributes {format(dir(new_pointer))}")
+        if hasattr(pointer, "text_frame"): 
+            self.logger.log_trace(f"_get_pointer_to_text, pointer.text_frame has attributes {format(dir(pointer.text_frame))}")
+            pointer = pointer.text_frame
+        if hasattr(pointer, "paragraphs") and len(pointer.paragraphs) > 0:
+            new_pointer = pointer.paragraphs[0]
+            self.logger.log_trace(f"Found paragraph as pointer with attributes: {format(dir(new_pointer))}")
+
+        return new_pointer
+                
+    def _update_text(self, text:str) -> None:
+        # Split LLM transformation per paragraph and ensure that the number of paragraph returned by LLM 
+        # does not exceed the original number of paragraphs
+        paragraphs = text.split("\n")
+        self.logger.log_trace(f"len(paragraphs): {len(paragraphs)}, len(self.list_pointer_source_data): {len(self.list_pointer_source_data)}, paragraphs: {pformat(paragraphs)}")
+        while (len(paragraphs) > 1 and len(paragraphs) > len(self.list_pointer_source_data)):
+            paragraphs[-2] += "\n" + paragraphs[-1]
+            paragraphs = paragraphs[:-1]
+            self.logger.log_trace(f"len(paragraphs): {len(paragraphs)}, len(self.list_pointer_source_data): {len(self.list_pointer_source_data)}, paragraphs: {pformat(paragraphs)}")
+        self.logger.log_trace(f"Processing {len(paragraphs)} paragraphs adapted to number of pointers: {len(self.list_pointer_source_data)}")
+        if len(paragraphs) > len(self.list_pointer_source_data):
+            self.logger.log_warn(f"len(paragraphs) ({len(paragraphs)}) > len(self.list_pointer_source_data) ({len(self.list_pointer_source_data)})")
+        # If the number of paragraphs returned by LLM is lower than the current number of paragraphs 
+        # in the original document delete the remaining paragraphs.
+        for index in range(len(paragraphs), len(self.list_pointer_source_data)):
+             self.logger.log_trace(f"Deleting paragraph index: {index}, initial text: {self.list_pointer_source_data[index].text}")
+             self._delete_paragraph(self.list_pointer_source_data[index])
+        for index in range(len(paragraphs)):
+            dbg_paragraph: str = paragraphs[index].replace('\n', '\\n')
+            self.logger.log_trace(f"Processing paragraph index: {index}, initial text: {self.list_pointer_source_data[index].text}, new text: {dbg_paragraph}")
+            self._update_paragraph(self.list_pointer_source_data[index], paragraphs[index])
 
 @dataclass
 class MultithreadedMetadata:

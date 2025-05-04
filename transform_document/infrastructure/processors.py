@@ -77,18 +77,18 @@ class SerializedDocProcessorType(IProcessorType):
 
             request = f"{request_str}"
         else:
-            self.logger.log_info(f"Skipping request because initial_text = >{text_to_transform}<")
+            self.logger.log_trace(f"Skipping request because initial_text = >{text_to_transform}<")
             return
 
-        request_info: str = '  ' + '\n  '.join(request.split('\n'))
-        self.logger.log_info(f'Request sent to LLM:\n{"-" * 20}\n\n{request_info}')
+        request_info: str = '  ' + '\n  '.join(request.replace('\n', '').replace(']', ']\n').split('\n'))
+        self.logger.log_trace(f'Request preparation to LLM:\n{"-" * 20}\n\n{request_info}')
 
         new_text = self.llm_request.transform_text(request, request_type)
         new_text_info: str = '  ' + '\n  '.join(new_text.split('\n'))
         self.logger.log_info(f'\nLLM response:\n{"-" * 13}\n{new_text_info}\n')
 
         metadata.update_llm_response_in_document(new_text, request_type)
-        self.logger.log_info(f'\n{"=" * 15} End request and document update {"=" * 15}\n')
+        self.logger.log_info(f'\n  >> {"=" * 15} End document update for this request {"=" * 15}\n')
 
     def process_all(self) -> None:
         self.trigger_process_start()

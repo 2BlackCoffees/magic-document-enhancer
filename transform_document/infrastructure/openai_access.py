@@ -31,6 +31,8 @@ class OpenAIAccess(IMLAccess):
         self.logger.log_trace(f'OpenAILineUpdateText.try_transform_line:\n'+\
                               f' text_to_transform = {text_to_transform}\n '+\
                               f' how_to_transform = {how_to_transform}')
+        
+        self.logger.log_info(f'Request to LLM:\n{"-" * 15}\n{pformat(messages)}')
 
         review = self.client.chat.completions.create(
             model=self.model_name,

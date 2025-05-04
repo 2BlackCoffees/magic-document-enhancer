@@ -72,15 +72,23 @@ class SerializedDocProcessorType(IProcessorType):
         if self.__is_context_needed(context, text_to_transform):
             request = f"[Considering the context: {context}] {request_str}"
 
+        elif text_to_transform is not None and len(text_to_transform) > 0:
+            self.logger.log_warn(f"Request will be performed without any found context: initial_text = >{text_to_transform}<, request: {request_str}")
+
+            request = f"{request_str}"
         else:
-            self.logger.log_info(f"Skipping request because context = >{context}<, initial_text = >{text_to_transform}<")
+            self.logger.log_info(f"Skipping request because initial_text = >{text_to_transform}<")
             return
 
-        self.logger.log_info(f'Request sent to LLM: {request}')
+        request_info: str = '  ' + '\n  '.join(request.split('\n'))
+        self.logger.log_info(f'Request sent to LLM:\n{"-" * 20}\n\n{request_info}')
+
         new_text = self.llm_request.transform_text(request, request_type)
-        self.logger.log_info(f'\n  LLM response:\n{new_text}\n')
+        new_text_info: str = '  ' + '\n  '.join(new_text.split('\n'))
+        self.logger.log_info(f'\nLLM response:\n{"-" * 13}\n{new_text_info}\n')
+
         metadata.update_llm_response_in_document(new_text, request_type)
-        self.logger.log_info(f'\n{"=" * 15}\n')
+        self.logger.log_info(f'\n{"=" * 15} End request and document update {"=" * 15}\n')
 
     def process_all(self) -> None:
         self.trigger_process_start()

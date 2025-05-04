@@ -111,30 +111,33 @@ class MetadataWindows(Metadata):
             run.text = run_text
             self.logger.log_trace(f"Text >{run_text}< was added to paragraph, initial style: Font name: '{run.font.name}', Font size: {run.font.size}, Underlines: {run.font.underline}, Bold: {run.font.bold}, Italic: {run.font.italic}")
             if style is not None:
-                self._set_paragraph_style(run, style)
+                self._set_paragraph_style_to_font(run, style)
                 self.logger.log_trace(f"Style updated to: Font name: '{run.font.name}', Font size: {run.font.size}, Underlines: {run.font.underline}, Bold: {run.font.bold}, Italic: {run.font.italic}, want_bold: {want_bold}")
             if want_bold: 
                 run.font.bold = True
                 self.logger.log_trace(f"Text {run_text} was set to bold")
 
-    # TODO: Has to be part of refactoring
     def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
-        current_style: any = self._get_paragraph_style(paragraph_pointer)
-        paragraph_pointer.text = ""
-        if hasattr(paragraph_pointer, "_parent") and hasattr(paragraph_pointer._parent, "paragraphs"):
-            for doc_idx, doc in enumerate(paragraph_pointer._parent.paragraphs):
-                doc.text = ""
-                # TODO: To be analyzed on the long term as this could make the file unreadable
-                if doc_idx > 0:
-                    self._delete_paragraph(doc)
+        if hasattr(paragraph_pointer, "style"):
+            current_style: any = paragraph_pointer.style
+            self._add_runs(paragraph_pointer, runs)    
+            paragraph_pointer.style = current_style
+        else:
+            current_style: any = self._get_paragraph_style_from_font(paragraph_pointer)
+            paragraph_pointer.text = ""
+            if hasattr(paragraph_pointer, "_parent") and hasattr(paragraph_pointer._parent, "paragraphs"):
+                for doc_idx, doc in enumerate(paragraph_pointer._parent.paragraphs):
+                    doc.text = ""
+                    # TODO: To be analyzed on the long term as this could make the file unreadable
+                    if doc_idx > 0:
+                        self._delete_paragraph(doc)
 
-        self._add_runs(paragraph_pointer, runs, current_style)    
+            self._add_runs(paragraph_pointer, runs, current_style)    
 
-    # TODO: Mind code duplication in MetadataDoc
     def _transform_paragraph_to_runs(self, paragraph: str) -> Tuple:
         runs_boldstyle_text: List = []
         for current_run in paragraph.split('\n'):
-            if len(current_run) == 0 or current_run == '\n':
+            if len(current_run) == 0 or re.match('^[\s\n]*$', current_run):
                 continue
             current_run += '\n'
             found_run: bool = True
@@ -158,7 +161,7 @@ class MetadataWindows(Metadata):
                                  
         return runs_boldstyle_text
 
-    def _get_paragraph_style(self, pointer: any) -> Tuple:
+    def _get_paragraph_style_from_font(self, pointer: any) -> Tuple:
         self.logger.log_trace(f"Pointer: {dir(pointer)}")
         if not self.use_paragraph_style and hasattr(pointer, 'runs') and len(pointer.runs) > 0:
             pointer = pointer.runs[0]
@@ -170,7 +173,7 @@ class MetadataWindows(Metadata):
                pointer.font.bold,
                pointer.font.italic)
 
-    def _set_paragraph_style(self, pointer: any, style: Tuple):
+    def _set_paragraph_style_to_font(self, pointer: any, style: Tuple):
         pointer.font.name,      \
         pointer.font.size,      \
         pointer.font.underline, \
@@ -196,7 +199,6 @@ class MetadataWindows(Metadata):
         for index in range(len(paragraphs), len(self.list_pointer_source_data)):
              self.list_pointer_source_data[index].text = ""
 
-    # TODO: Use this method in word and PPT every where
     def _update_paragraph(self, paragraph_pointer: any, new_paragraph_text: str) -> any:
         updated_paragraph_pointer = self._get_pointer_to_text(paragraph_pointer)
         if hasattr(updated_paragraph_pointer, "text"):
@@ -250,13 +252,13 @@ class MetadataDoc(MetadataWindows):
 
         return new_paragraph
 
-    def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
-        if hasattr(paragraph_pointer, "style"):
-            current_style: any = paragraph_pointer.style
-            self._add_runs(paragraph_pointer, runs)    
-            paragraph_pointer.style = current_style
-        else:
-            super()._update_paragraph_in_place(paragraph_pointer, runs)
+    # def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
+    #     if hasattr(paragraph_pointer, "style"):
+    #         current_style: any = paragraph_pointer.style
+    #         self._add_runs(paragraph_pointer, runs)    
+    #         paragraph_pointer.style = current_style
+    #     else:
+    #         super()._update_paragraph_in_place(paragraph_pointer, runs)
 
     def __split_paragraph(self, paragraphs: List, idx_paragraph: int, split_char: str = '.'):
         paragraph: str = paragraphs[idx_paragraph]
@@ -332,22 +334,7 @@ class MetadataDoc(MetadataWindows):
             paragraph = re.sub(r'^\s*[#]+\s*', '', paragraph)
             self.logger.log_trace(f"The paragraph >{paragraph}< was cleaned of heading marking if any were present")
             
-            # TODO: this code should be replaced with _transform_paragraph_to_runs
-            runs_style_text: List = []
-            found_run: bool = True
-            current_run: str = paragraph
-            while found_run:
-                m_run = re.match(r'^(?P<before_bold>.*?)\*\*(?P<in_bold>.*?)\*\*(?P<after_bold>.*)$', current_run)
-                if m_run is None:
-                    found_run = False
-                    runs_style_text.append((False, current_run))
-                else:
-                    runs_style_text.append((False, m_run.group('before_bold')))
-                    runs_style_text.append((True, m_run.group('in_bold')))
-                    current_run = m_run.group('after_bold')
-                    self.logger.log_trace(f"The text >{m_run.group('in_bold')}< will be bold")
-
-            #runs_style_text: List = self._transform_paragraph_to_runs(paragraph)
+            runs_style_text: List = self._transform_paragraph_to_runs(paragraph)
 
             if paragraph_id > 0:
                 next_paragraph_pointer = self.__insert_paragraph_after(next_paragraph_pointer, runs_style_text, next_paragraph_style)

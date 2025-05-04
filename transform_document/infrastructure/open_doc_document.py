@@ -33,27 +33,37 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
             self.logger.log_info(f' * {style.name}')
 
     def __get_heading_deepness(self, heading_style) -> int:
-        regexp = re.compile(r'^heading\s+(\d+)')
+        regexp = re.compile(r'^heading\s+(?P<heading_deepness>\d+)')
         m = regexp.match(heading_style)
         if m:
-            return int(m.group(1))
+            return int(m.group('heading_deepness'))
         return -1
+
+    def __prepend_heading_to_paragraph_text(self, heading_text, paragraph_text) -> str:
+        return heading_text + "\n" + paragraph_text
 
     def __append_data(self, file_content: List, current_heading_style: str, highest_heading_style: str, \
                       latest_heading_pointer: any, heading_text: str, \
-                      latest_headings_text: List, paragraph_text: str):
+                      latest_paragraphs_pointer: List, paragraph_text: str):
         # When appending a new heading and assocaited text, we search for the latest element of file_content
         # The we iterate over all heading searching for latest element of each array until parent heading is found
         heading_deepness: int = self.__get_heading_deepness(current_heading_style)
         if heading_deepness > 0:
             heading_text = f"{'#' * heading_deepness} {heading_text}"
+            self.logger.log_trace(f"Found heading {current_heading_style}, deepness: {heading_deepness}, text: {heading_text}")
 
+        # paragraph_pointer: List = [latest_heading_pointer]
+        # if latest_paragraphs_pointer is not None and len(latest_paragraphs_pointer) > 0:
+        #     paragraph_pointer.extend(latest_paragraphs_pointer)
         new_data_structure: Dict = {
             current_heading_style:[
                 {self.HEADING_NAME: heading_text, self.HEADING_POINTER: latest_heading_pointer},
-                {self.SECTION_TEXT: paragraph_text, self.PARAGRAPH_POINTERS: latest_headings_text}
+                {self.SECTION_TEXT: self.__prepend_heading_to_paragraph_text(heading_text, paragraph_text), self.PARAGRAPH_POINTERS: latest_paragraphs_pointer}
             ]
         }
+        self.logger.log_trace(f"new_data_structure: {pformat(new_data_structure, width=200)}")
+        self.logger.log_trace(f"self.PARAGRAPH_POINTERS: {pformat(['Pointer: ' + str(pointer) + ', Text:' + pointer.text for pointer in new_data_structure[current_heading_style][1][self.PARAGRAPH_POINTERS]], width=200)}")
+
         if (len(file_content) > 0 or current_heading_style < highest_heading_style) and \
                             current_heading_style.startswith("heading"):
             # Search for latest data structure indexed by a header higher than current one
@@ -64,20 +74,18 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                 while sub_heading_found:
                     sub_heading_found = False
                     for key, dictionary in parent_data_structure[-1].items():
-                        self.logger.log_trace(f"In for loop: key: {key}, \ndictionnary: {str(pformat(dictionary))[:100]}\n\n")
+                        self.logger.log_trace(f"In for loop: key: {key}, \ndictionnary: {str(pformat(dictionary, width=200))[:100]}\n\n")
                         if key.startswith("heading") and key < current_heading_style:
-                            self.logger.log_trace(f"**** Key {key} accepted****")
+                            self.logger.log_trace(f"**** Heading {key} accepted****")
                             parent_data_structure = dictionary
                             # There can be only one key
                             sub_heading_found = True
                             break
-                    if sub_heading_found:
-                        self.logger.log_trace(f"\nIn while: latest_data_structure: {str(pformat(parent_data_structure))[:100]}")
-            self.logger.log_trace(f"parent_data_structure: {pformat(parent_data_structure)}")
+            self.logger.log_trace(f"parent_data_structure: {pformat(parent_data_structure, width=200)}")
             parent_data_structure.append(new_data_structure)
         else:
             file_content.append(new_data_structure)
-        self.logger.log_debug(f"file_content: {pformat(file_content)}")
+        self.logger.log_debug(f"file_content: {pformat(file_content, width=230)}")
 
     def __iter_headings(self, paragraphs):
         file_content: List = []
@@ -145,7 +153,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                    (current_heading_deepness < highest_heading_deepness and current_heading_deepness > 0):
                     highest_heading_style = current_heading_style
             else:
-                # Typcally a document starts wit a main title that we represent here as heading 0
+                # Typcally a document starts with a main title that we represent here as heading 0
                 if latest_heading_pointer == None:
                     latest_heading_text = paragraph.text
                     latest_heading_pointer = paragraph
@@ -157,7 +165,7 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
         self.__append_data(file_content, latest_heading_style, highest_heading_style, \
                            latest_heading_pointer, latest_heading_text, \
                            latest_paragraphs_pointer, latest_text_paragraph)
-        self.logger.log_debug(pformat(file_content))
+        self.logger.log_debug(f"File content returned: \n{pformat(file_content, width=230)}")
         return file_content
     
     def __get_context(self, prev_headings: List) -> str:
@@ -166,8 +174,49 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
         else: 
             return "The context is a list of headings belonging to the document. This list is intended to provide guidance to the LLM:" +\
                       "\n".join(prev_headings)  
-
+        
     def __dispatch_requests(self, file_content: List, prev_headings: List):
+        paragraph_text: str = ""
+        list_pointers: List = []
+        heading_name: str = None
+        request_type: str = LLMUtils.DEFAULT_REQUEST
+        heading_found: bool = False
+        next_prev_headings: List = []
+        for key_in_section in [self.HEADING_POINTER, self.PARAGRAPH_POINTERS]:
+            for section in file_content:
+                if isinstance(section, dict):
+                    if not key_in_section in section:
+                        continue
+                    if self.SECTION_TEXT in section and len(section[self.SECTION_TEXT]) > 0:
+                        paragraph_text += section[self.SECTION_TEXT]
+                    if self.HEADING_POINTER in section:
+                        list_pointers.append(section[self.HEADING_POINTER])
+                    if self.PARAGRAPH_POINTERS in section: 
+                        list_pointers.extend(section[self.PARAGRAPH_POINTERS])
+
+                    if self.HEADING_NAME in section:
+                        heading_name = section[self.HEADING_NAME]
+                        heading_found = True
+                        next_prev_headings.append(heading_name)
+                    
+        if heading_found and paragraph_text == self.__prepend_heading_to_paragraph_text(heading_name, ""):
+            request_type = LLMUtils.HEADING_REQUEST 
+
+        context: str = self.__get_context(prev_headings)
+        prev_headings.extend(next_prev_headings)
+        self.logger.log_trace(f"Preparing text to be used for the request: {paragraph_text}")
+        self.worker.add_work_element(MetadataDoc(list_pointers, \
+                                                 context, \
+                                                 paragraph_text,
+                                                 request_type,
+                                                 self.logger, self.document_styles))
+        match = re.compile(r'^heading\s+(\d+)')
+        for section in file_content:
+            for key, sub_section in section.items(): 
+                if match.match(key):
+                    self.__dispatch_requests(sub_section, prev_headings)
+
+    def __dispatch_requests_DELETEME(self, file_content: List, prev_headings: List):
         for section in file_content:
             heading_name: str = None
             if isinstance(section, dict):
@@ -186,11 +235,12 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
                     prev_headings.append(heading_name)
 
                 context: str = self.__get_context(prev_headings)
-                self.worker.add_work_element(MetadataDoc(self.document_styles, list_pointers, \
+                self.logger.log_trace(f'Extracted text section for LLM request: {section_text}')
+                self.worker.add_work_element(MetadataDoc(list_pointers, \
                                                          context, \
                                                          section_text,
                                                          request_type,
-                                                         self.logger))
+                                                         self.logger, self.document_styles))
 
                 match = re.compile(r'^heading\s+(\d+)')
                 for key, sub_section in section.items(): 
@@ -234,11 +284,11 @@ class OpenDOCDocument(IOpenAndUpdateDocument):
             context: str = self.__get_context(prev_headings)
 
             # In word dpcument we are going to replace a table 
-            self.worker.add_work_element(MetadataDoc(self.document_styles, [doc_table], \
+            self.worker.add_work_element(MetadataDoc([doc_table], \
                                                       context, \
                                                       md_table,
                                                       LLMUtils.TABLE_REQUEST,
-                                                      self.logger
+                                                      self.logger, self.document_styles
                                                       ))            
 
     def process(self):

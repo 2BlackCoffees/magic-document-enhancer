@@ -24,7 +24,7 @@ class ThreadSynchronization:
 
 class Metadata(ABC):
     
-    def __init__(self, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger):
+    def __init__(self, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger, document_style: List = None):
         self.list_pointer_source_data: List = list_pointer_source_data
         self.context = context
         self.text_to_transform: str = text_to_transform
@@ -33,6 +33,7 @@ class Metadata(ABC):
         self.logger.log_trace(f"Add metadata of request type {request_type}, text_to_transform: {text_to_transform}")
         # Will have to be moved to MetadaWindows
         self.use_paragraph_style = False
+        self.document_style: List = document_style
 
     def get_text_to_transform(self) -> str:
         return self.text_to_transform
@@ -98,10 +99,12 @@ class MetadataWindows(Metadata):
         p = paragraph_pointer._element
         parent = p.getparent()
         if parent is not None:
-            p.getparent().remove(p)
+            self.logger.log_trace(f"Deleting element: {paragraph_pointer}: >{paragraph_pointer.text}<, pointer.element: {p}: >{p.text}<")
+            self.logger.log_trace(f"Parent of element is: {parent}: >{parent.text}<")
+            parent.remove(p)
             p._p = p._element = None
         else:
-            self.logger.log_warn(f"Paragraph {paragraph_pointer.text} could not be deleted.")
+            self.logger.log_warn(f"Paragraph {paragraph_pointer}: {paragraph_pointer.text} could not be deleted.")
             paragraph_pointer.text = ""
     
     # TODO: Has to be part of refactoring
@@ -116,6 +119,7 @@ class MetadataWindows(Metadata):
             if want_bold: 
                 run.font.bold = True
                 self.logger.log_trace(f"Text {run_text} was set to bold")
+        self.logger.log_trace(f"_add_runs with style: new_paragraph.text =  {new_paragraph.text}")
 
     def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
         if hasattr(paragraph_pointer, "style"):
@@ -131,6 +135,8 @@ class MetadataWindows(Metadata):
                     # TODO: To be analyzed on the long term as this could make the file unreadable
                     if doc_idx > 0:
                         self._delete_paragraph(doc)
+                    else:
+                        self.logger.log_trace("Not deleting first element of pointer {}")
 
             self._add_runs(paragraph_pointer, runs, current_style)    
 
@@ -214,9 +220,10 @@ class MetadataDoc(MetadataWindows):
 
     thread_lock_queue = threading.Lock()
 
-    def __init__(self, document_style: List, list_pointer_source_data: List, context: str, text_to_transform: str, request_type: str, logger: GenericLogger):
-        self.document_style: List = document_style
-        super().__init__(list_pointer_source_data, context, text_to_transform, request_type, logger)
+    def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
+        current_style: any = paragraph_pointer.style
+        self._add_runs(paragraph_pointer, runs)    
+        paragraph_pointer.style = current_style
 
     def _add_runs(self, new_paragraph: any, runs: List):
         for want_bold, run_text in runs:
@@ -226,39 +233,41 @@ class MetadataDoc(MetadataWindows):
                 run = new_paragraph.add_run(run_text)
                 if want_bold: 
                     run.bold = True
-                    self.logger.log_trace(f"String {run_text} was set to bold")
+                    self.logger.log_trace(f"Text {run_text} was set to bold")
+        self.logger.log_trace(f"_add_runs without style: new_paragraph.text =  {new_paragraph.text}")
 
     def __paragraph_index(self, paragraph_pointer):
         "Get the index of the paragraph in the document"
-        doc = paragraph_pointer._parent
+        parent_doc = paragraph_pointer._parent
         # the paragraphs elements are being generated on the fly,
         # they change all the time
         # so in order to index, we must use the elements
-        l_elements = [p._element for p in doc.paragraphs]
-        return l_elements.index(paragraph_pointer._element)
+        for p_idx, p in enumerate(parent_doc.paragraphs):
+            if p._element == paragraph_pointer._element:
+                return p_idx
+
+        self.logger.log_warn(f'Could not find paragraph {paragraph_pointer._element} (Text: {paragraph_pointer.text}) from list: {parent_doc.paragraphs} (Text: {pformat([p.text for p in parent_doc.paragraphs])})')
+        return -1
+        # l_elements = [p._element for p in doc.paragraphs]
+        # return l_elements.index(paragraph_pointer._element)
 
                     
     def __insert_paragraph_after(self, paragraph_pointer: any, runs: List, style=None):
-        doc = paragraph_pointer._parent
+        self.logger.log_trace(f"Entering __insert_paragraph_after with {paragraph_pointer} = paragraph_pointer.text = {paragraph_pointer.text}")
+        parent_doc = paragraph_pointer._parent
+        self.logger.log_trace(f"__insert_paragraph_after, parent = {parent_doc}")
         i = self.__paragraph_index(paragraph_pointer) + 1 # next
-        if i < len(doc.paragraphs):
+        if i < len(parent_doc.paragraphs) and i > 0:
             # we find the next paragraph and we insert before:
-            next_paragraph = doc.paragraphs[i]
+            next_paragraph = parent_doc.paragraphs[i]
+            self.logger.log_trace(f"next_paragraph = {next_paragraph}, next_paragraph.text = {next_paragraph.text}")
             new_paragraph = next_paragraph.insert_paragraph_before('', style)
         else:
             # we reached the end, so we need to create a new one:
-            new_paragraph = doc.add_paragraph('', style)
+            new_paragraph = parent_doc.add_paragraph('', style)
         self._add_runs(new_paragraph, runs)
 
         return new_paragraph
-
-    # def _update_paragraph_in_place(self, paragraph_pointer: any, runs: List):
-    #     if hasattr(paragraph_pointer, "style"):
-    #         current_style: any = paragraph_pointer.style
-    #         self._add_runs(paragraph_pointer, runs)    
-    #         paragraph_pointer.style = current_style
-    #     else:
-    #         super()._update_paragraph_in_place(paragraph_pointer, runs)
 
     def __split_paragraph(self, paragraphs: List, idx_paragraph: int, split_char: str = '.'):
         paragraph: str = paragraphs[idx_paragraph]
@@ -295,9 +304,10 @@ class MetadataDoc(MetadataWindows):
             paragraph: str = paragraphs[idx_paragraph]
             self.logger.log_trace(f"Checking {paragraph} index {idx_paragraph}, checking if it is a title")
             if re.search(r'^\s*#', paragraph):
+                self.logger.log_trace(f"Yes {paragraph} is a title")
                 self.__split_paragraph(paragraphs, idx_paragraph)
         
-        self.logger.log_trace(f"len(paragraphs) {len(paragraphs)}, {paragraphs} len(self.list_pointer_source_data) {len(self.list_pointer_source_data)}, {self.list_pointer_source_data}")
+        self.logger.log_trace(f"Initial data: len(paragraphs) {len(paragraphs)}, {paragraphs} len(self.list_pointer_source_data) {len(self.list_pointer_source_data)}, {pformat([str(pointer) + ': ' + pointer.text for pointer in self.list_pointer_source_data], width=200)}")
         if len(paragraphs) > 0 and len(self.list_pointer_source_data) > 0:
             self.list_pointer_source_data[0].text = ""
             self.logger.log_trace(f"Checking style of existing paragraph {paragraph} style {self.list_pointer_source_data[0].style.name}")
@@ -307,6 +317,11 @@ class MetadataDoc(MetadataWindows):
         if len(self.list_pointer_source_data) > 1:
             for paragraph_pointer in self.list_pointer_source_data[1:]:
                 self._delete_paragraph(paragraph_pointer)
+        if len(self.list_pointer_source_data) <= 0:
+            self.logger.log_warn(f"Was expecting at least one element in array of pointer but got {len(self.list_pointer_source_data)}: {self.list_pointer_source_data}")
+        self.logger.log_trace(f"This pointer will not be deleted {self.list_pointer_source_data[0]}:  {self.list_pointer_source_data[0].text}")
+
+        self.logger.log_trace(f"After deletion of the pointers: len(paragraphs) {len(paragraphs)}, {paragraphs} len(self.list_pointer_source_data) Deleted are: {len(self.list_pointer_source_data) - 1}, {pformat([str(pointer) + ': ' + pointer.text for pointer in self.list_pointer_source_data[1:]], width=200)}")
         next_paragraph_pointer: any = self.list_pointer_source_data[0]
         next_paragraph_style = next_paragraph_pointer.style
       
@@ -459,6 +474,11 @@ class IQueue(ABC):
         self.delete_next_element()
         return return_value
     
+    @abstractmethod
+    def get_all_queue_content(self) -> List[Metadata]:
+        """
+        """
+    
 class Queue(IQueue):
     def __init__(self):
         self.queue: List[Metadata] = []
@@ -496,6 +516,8 @@ class Queue(IQueue):
         queue_size: int = len(self.queue)
         return queue_size
 
+    def get_all_queue_content(self) -> List[Metadata]:
+        return self.queue.copy()
 
 # TODO: This queue needs to be refactored, 
 # it does not need to be threadsafe anymore.
@@ -587,5 +609,9 @@ class ThreadSafeQueue(IQueue):
         self.thread_lock_queue.release()
 
     
-    
+    def get_all_queue_content(self) -> List[Metadata]:
+        self.thread_lock_queue.acquire()
+        queue_copy = self.queue.copy()
+        self.thread_lock_queue.release()
+        return queue_copy
 

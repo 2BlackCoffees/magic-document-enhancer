@@ -1,14 +1,17 @@
 from typing import List
+from pprint import pformat
+import threading
+import time
+from datetime import datetime
+import re
+
 from domain.llm_endpoint_request import LLMEndpointRequest
 from domain.queue import Queue, Metadata, ThreadSafeQueue
 from domain.logger import GenericLogger
 from domain.worker_class import IProcessorType
 from domain.llm_utils import LLMUtils
 from infrastructure.openai_access_multithreaded import MultithreadedAccess, Statistics, BackoffTimeHandler
-import threading
-import time
-from datetime import datetime
-import re
+
 
 class SerializedDocProcessorType(IProcessorType):
     def __init__(self, llm_request: LLMEndpointRequest, logger: GenericLogger):
@@ -20,6 +23,9 @@ class SerializedDocProcessorType(IProcessorType):
 
     def add_element(self, metadata: Metadata) -> None:
         self.queue.add_element(metadata)
+        self.logger.log_trace(f"SerializedDocProcessorType: Saved elements in queue: Latest element: {metadata.get_text_to_transform()}\nAll elements: {pformat(['Element: ' + element.get_text_to_transform() for element in self.queue.get_all_queue_content()], width=250)}")
+        self.logger.log_trace(f"All text elements: {pformat(['Element: ' + element.get_text_to_transform() for element in self.queue.get_all_queue_content()], width=250)}")
+        #self.logger.log_trace(f"All pointers elements: {pformat(['Pointer: ' + ', '.join([str(pointer) + ': ' + pointer.text for pointer in element.get_pointers()]) + element.get_text_to_transform() for element in self.queue.get_all_queue_content()], width=250)}")
 
     def is_empty(self) -> bool:
         return self.queue.is_empty()
@@ -114,6 +120,9 @@ class SerializedSynchronizedDocProcessorType(IProcessorType):
  
     def add_element(self, metadata: Metadata) -> None:
         self.queue.add_element(metadata)
+        self.logger.log_trace(f"SerializedSynchronizedDocProcessorType: Saved elements in queue: Latest element: {metadata.get_text_to_transform()}")
+        self.logger.log_trace(f"All text elements: {pformat(['Element: ' + element.get_text_to_transform() for element in self.queue.get_all_queue_content()], width=250)}")
+        self.logger.log_trace(f"All pointers elements: {pformat(['Pointer: ' + ', '.join([str(pointer) + ': ' + pointer.text for pointer in element.get_pointers()]) + element.get_text_to_transform() for element in self.queue.get_all_queue_content()], width=250)}")
 
     def is_empty(self) -> bool:
         return self.queue.is_empty()
